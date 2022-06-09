@@ -1,4 +1,4 @@
-# Deep Perturbation Inference
+# Variational Causal Inference
 
 
 ## Installation
@@ -6,8 +6,8 @@
 ### 1. Create Conda Environment
 ```bash
 conda config --append channels conda-forge
-conda create -n dpi-env --file requirements.txt
-conda activate dpi-env
+conda create -n vci-env --file requirements.txt
+conda activate vci-env
 ```
 
 ### 2. Install Learning Libraries
@@ -17,13 +17,13 @@ conda activate dpi-env
 
 
 ## Run
-Once the environment is set up, the function call to train & evaluate DPI is:
+Once the environment is set up, the function call to train & evaluate the model is:
 
 ```bash
 ./main.sh &
 ```
 
-A list of flags may be found in `main.sh` and `src/main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
+A list of flags may be found in `main.sh` and `vci/main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
 
 ## License
 
