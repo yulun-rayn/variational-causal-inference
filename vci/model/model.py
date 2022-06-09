@@ -1,0 +1,573 @@
+import json
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+from torch.distributions import Normal
+
+from model.module import MLP, NegativeBinomial, ZeroInflatedNegativeBinomial
+
+from utils.math_utils import (
+    kldiv_normal,
+    logprob_normal,
+    logprob_nb_positive,
+    logprob_zinb_positive
+)
+
+#####################################################
+#                    MODEL SAVING                   #
+#####################################################
+
+def init_POVI(state):
+    # TODO
+    net = PotentialOutcomeVI(state['input_dim'],
+                state['nb_hidden'],
+                state['nb_layers'],
+                state['output_dim'])
+    net.load_state_dict(state['state_dict'])
+    return net
+
+def load_POVI(state_path):
+    state = torch.load(state_path)
+    return init_POVI(state)
+
+def save_POVI(net, state_path=None):
+    torch.save(net.get_dict(), state_path)
+
+#####################################################
+#                     MAIN MODEL                    #
+#####################################################
+
+class PotentialOutcomeVI(torch.nn.Module):
+    def __init__(
+        self,
+        num_outcomes,
+        num_treatments,
+        num_covariates,
+        embed_outcomes=True,
+        embed_treatments=False,
+        embed_covariates=True,
+        outcome_dist="normal",
+        dist_mode='matching',
+        patience=5,
+        seed=0,
+        device="cuda",
+        hparams=""
+    ):
+        super(PotentialOutcomeVI, self).__init__()
+        # set generic attributes
+        self.num_outcomes = num_outcomes
+        self.num_treatments = num_treatments
+        self.num_covariates = num_covariates
+        self.embed_outcomes = embed_outcomes
+        self.embed_treatments = embed_treatments
+        self.embed_covariates = embed_covariates
+        self.outcome_dist = outcome_dist
+        self.dist_mode=dist_mode
+        self.device = device
+        self.seed = seed
+        # early-stopping
+        self.patience = patience
+        self.best_score = -1e3
+        self.patience_trials = 0
+        # set hyperparameters
+        self.set_hparams_(hparams)
+        # distribution parameters
+        if self.outcome_dist == 'nb':
+            self.num_dist_params = 2
+        elif self.outcome_dist == 'zinb':
+            self.num_dist_params = 3
+        elif self.outcome_dist == 'normal':
+            self.num_dist_params = 2
+        else:
+            raise ValueError("outcome_dist not recognized")
+
+        params = []
+
+        # input embeddings
+        if self.embed_outcomes:
+            self.outcomes_embeddings = MLP(
+                [num_outcomes, self.hparams["encoder_width"]]
+            )
+            outcome_dim = self.hparams["encoder_width"]
+            params.extend(list(self.outcomes_embeddings.parameters()))
+        else:
+            outcome_dim = num_outcomes
+
+        if self.embed_treatments:
+            self.treatments_embeddings = torch.nn.Embedding(
+                self.num_treatments, self.hparams["encoder_width"]
+            )
+            treatment_dim = self.hparams["encoder_width"]
+            params.extend(list(self.treatments_embeddings.parameters()))
+        else:
+            treatment_dim = num_treatments
+
+        if self.embed_covariates:
+            covariates_emb_dim = self.hparams["encoder_width"]//len(self.num_covariates)
+            self.covariates_embeddings = []
+            for num_covariate in self.num_covariates:
+                self.covariates_embeddings.append(
+                    torch.nn.Embedding(num_covariate, 
+                        covariates_emb_dim
+                    )
+                )
+            self.covariates_embeddings = torch.nn.Sequential(
+                *self.covariates_embeddings
+            )
+            covariate_dim = covariates_emb_dim*len(self.num_covariates)
+            for emb in self.covariates_embeddings:
+                params.extend(list(emb.parameters()))
+        else:
+            covariate_dim = sum(num_covariates)
+
+        # individual-specific model
+        self.encoder = MLP(
+            [outcome_dim+treatment_dim+covariate_dim]
+            + [self.hparams["encoder_width"]] * self.hparams["encoder_depth"]
+            + [self.hparams["latent_dim"] * 2]
+        )
+        params.extend(list(self.encoder.parameters()))
+
+        self.decoder = MLP(
+            [self.hparams["latent_dim"]+treatment_dim]
+            + [self.hparams["decoder_width"]] * self.hparams["decoder_depth"]
+            + [num_outcomes * self.num_dist_params]
+        )
+        params.extend(list(self.decoder.parameters()))
+
+        self.optimizer_autoencoder = torch.optim.Adam(
+            params,
+            lr=self.hparams["autoencoder_lr"],
+            weight_decay=self.hparams["autoencoder_wd"],
+        )
+        self.scheduler_autoencoder = torch.optim.lr_scheduler.StepLR(
+            self.optimizer_autoencoder, step_size=self.hparams["step_size_lr"]
+        )
+
+        # covariate-specific model
+        if self.dist_mode == 'adversarial':
+            self.treatment_discriminator = MLP(
+                [num_outcomes]
+                + [self.hparams["discriminator_width"]] * self.hparams["discriminator_depth"]
+                + [num_treatments]
+            )
+            self.loss_treatment_discriminator = torch.nn.CrossEntropyLoss()
+            params = list(self.treatment_discriminator.parameters())
+
+            self.covariate_discriminator = []
+            self.loss_covariate_discriminator = []
+            for num_covariate in self.num_covariates:
+                adv = MLP(
+                    [num_outcomes]
+                    + [self.hparams["discriminator_width"]]
+                        * self.hparams["discriminator_depth"]
+                    + [num_covariate]
+                )
+                self.covariate_discriminator.append(adv)
+                self.loss_covariate_discriminator.append(torch.nn.CrossEntropyLoss())
+                params.extend(list(adv.parameters()))
+
+            self.optimizer_discriminator = torch.optim.Adam(
+                params,
+                lr=self.hparams["discriminator_lr"],
+                weight_decay=self.hparams["discriminator_wd"],
+            )
+            self.scheduler_discriminator = torch.optim.lr_scheduler.StepLR(
+                self.optimizer_discriminator, step_size=self.hparams["step_size_lr"]
+            )
+        elif self.dist_mode == 'estimate':
+            self.outcome_estimator = MLP(
+                [treatment_dim+covariate_dim]
+                + [self.hparams["estimator_width"]] * self.hparams["estimator_depth"]
+                + [num_outcomes * self.num_dist_params]
+            )
+            self.loss_outcome_estimator = torch.nn.CrossEntropyLoss()
+            params = list(self.outcome_estimator.parameters())
+
+            self.optimizer_estimator = torch.optim.Adam(
+                params,
+                lr=self.hparams["estimator_lr"],
+                weight_decay=self.hparams["estimator_wd"],
+            )
+            self.scheduler_estimator = torch.optim.lr_scheduler.StepLR(
+                self.optimizer_estimator, step_size=self.hparams["step_size_lr"]
+            )
+        elif self.dist_mode == 'matching':
+            pass
+        else:
+            raise ValueError("dist_mode not recognized")
+
+        self.iteration = 0
+
+        self.to(self.device)
+
+        self.history = {"epoch": [], "stats_epoch": []}
+
+    def set_hparams_(self, hparams):
+        """
+        Set hyper-parameters to default values or values fixed by user for those
+        hyper-parameters specified in the JSON string `hparams`.
+        """
+
+        self.hparams = {
+            "latent_dim": 128,
+            "dosers_width": 128,
+            "dosers_depth": 2,
+            "encoder_width": 128,
+            "encoder_depth": 2,
+            "decoder_width": 128,
+            "decoder_depth": 2,
+            "discriminator_width": 64,
+            "discriminator_depth": 2,
+            "estimator_width": 64,
+            "estimator_depth": 2,
+            "indiv-spec_lh_weight": 1.0,
+            "covar-spec_lh_weight": 1.5,
+            "kl_divergence_weight": 0.1,
+            "mc_sample_size": 30,
+            "kde_kernel_std": 1.,
+            "autoencoder_lr": 3e-4,
+            "discriminator_lr": 3e-4,
+            "estimator_lr": 3e-4,
+            "autoencoder_wd": 4e-7,
+            "discriminator_wd": 4e-7,
+            "estimator_wd": 4e-7,
+            "batch_size": 64,
+            "step_size_lr": 45,
+        }
+
+        # the user may fix some hparams
+        if hparams != "":
+            if isinstance(hparams, str):
+                self.hparams.update(json.loads(hparams))
+            else:
+                self.hparams.update(hparams)
+
+        return self.hparams
+    
+    def encode(self, outcomes, treatments, covariates, detach=True):
+        if self.embed_outcomes:
+            outcomes = self.outcomes_embeddings(outcomes)
+        if self.embed_treatments:
+            treatments = self.treatments_embeddings(treatments.argmax(1))
+        if self.embed_covariates:
+            covariates = [emb(covar.argmax(1)) 
+                for covar, emb in zip(covariates, self.covariates_embeddings)
+            ]
+
+        inputs = torch.cat([outcomes, treatments] + covariates, 1)
+
+        if detach:
+            with torch.autograd.no_grad():
+                outputs = self.encoder(inputs)
+            return outputs.detach()
+        else:
+            return self.encoder(inputs)
+
+    def decode(self, latents, treatments, detach=True):
+        latents, treatments = self.move_inputs(latents, treatments)
+
+        if self.embed_treatments:
+            treatments = self.treatments_embeddings(treatments.argmax(1))
+
+        inputs = torch.cat([latents, treatments], 1)
+
+        if detach:
+            with torch.autograd.no_grad():
+                outputs = self.decoder(inputs)
+            return outputs.detach()
+        else:
+            return self.decoder(inputs)
+
+    def reparameterize(self, mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+        """
+        Reparameterization trick to sample from N(mu, var) from
+        N(0,1).
+        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
+        :param sigma: (Tensor) Standard deviation of the latent Gaussian [B x D]
+        :return: (Tensor) [B x D]
+        """
+        eps = torch.randn_like(sigma)
+        return eps * sigma + mu
+
+    def distributionize(self, constructions, dim=None, dist=None, eps=1e-3):
+        if dim is None:
+            dim = self.num_outcomes
+        if dist is None:
+            dist = self.outcome_dist
+
+        if dist == 'nb':
+            mus = F.softplus(constructions[:, :dim]).add(eps)
+            thetas = F.softplus(constructions[:, dim:]).add(eps)
+            dist = NegativeBinomial(
+                mu=mus, theta=thetas
+            )
+        elif dist == 'zinb':
+            mus = F.softplus(constructions[:, :dim]).add(eps)
+            thetas = F.softplus(constructions[:, dim:(2*dim)]).add(eps)
+            zi_logits = constructions[:, (2*dim):].add(eps)
+            dist = ZeroInflatedNegativeBinomial(
+                mu=mus, theta=thetas, zi_logits=zi_logits
+            )
+        elif dist == 'normal':
+            locs = constructions[:, :dim]
+            scales = F.softplus(constructions[:, dim:]).add(eps)
+            dist = Normal(
+                loc=locs, scale=scales
+            )
+
+        return dist
+
+    def sample(self, mu: torch.Tensor, sigma: torch.Tensor, treatments: torch.Tensor, 
+            size=1, detach=True) -> torch.Tensor:
+        mu = mu.repeat(size, 1)
+        sigma = sigma.repeat(size, 1)
+        treatments = treatments.repeat(size, 1)
+
+        latents = self.reparameterize(mu, sigma)
+
+        if detach:
+            with torch.autograd.no_grad():
+                samples = self.decode(latents, treatments)
+            return samples.detach()
+        else:
+            return self.decode(latents, treatments, detach=False)
+
+    def predict(
+        self,
+        outcomes,
+        treatments,
+        cf_treatments,
+        covariates,
+        return_dist=False
+    ):
+        """
+        Predict "what would have the gene expression `outcomes` been, had the
+        cells in `outcomes` with cell types `cell_types` been treated with
+        combination of treatments `treatments`.
+        """
+        outcomes, treatments, cf_treatments, covariates = self.move_inputs(
+            outcomes, treatments, cf_treatments, covariates
+        )
+        if cf_treatments is None:
+            cf_treatments = treatments
+
+        latents_constr = self.encode(outcomes, treatments, covariates)
+        latents_dist = self.distributionize(
+            latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+        )
+
+        outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
+        outcomes_dist = self.distributionize(outcomes_constr)
+
+        if return_dist:
+            return outcomes_dist
+        else:
+            return outcomes_dist.mean
+
+    def generate(
+        self,
+        outcomes,
+        treatments,
+        cf_treatments,
+        covariates,
+        return_dist=False
+    ):
+        outcomes, treatments, cf_treatments, covariates = self.move_inputs(
+            outcomes, treatments, cf_treatments, covariates
+        )
+        if cf_treatments is None:
+            cf_treatments = treatments
+
+        latents_constr = self.encode(outcomes, treatments, covariates)
+        latents_dist = self.distributionize(
+            latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+        )
+
+        outcomes_constr_samp = self.sample(
+            latents_dist.mean, latents_dist.stddev, treatments
+        )
+        outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
+
+        if return_dist:
+            return outcomes_dist_samp
+        else:
+            return outcomes_dist_samp.mean
+
+    def logprob(self, outcomes, outcomes_param, dist=None):
+        """
+        Compute log likelihood.
+        """
+        if dist is None:
+            dist = self.outcome_dist
+
+        num = len(outcomes)
+        if isinstance(outcomes, list):
+            sizes = torch.tensor(
+                [out.size(0) for out in outcomes], device=self.device
+            )
+            weights = torch.repeat_interleave(1./sizes, sizes, dim=0)
+            outcomes_param = [
+                torch.repeat_interleave(out, sizes, dim=0) 
+                for out in outcomes_param
+            ]
+            outcomes = torch.cat(outcomes, 0)
+        elif isinstance(outcomes_param[0], list):
+            sizes = torch.tensor(
+                [out.size(0) for out in outcomes_param[0]], device=self.device
+            )
+            weights = torch.repeat_interleave(1./sizes, sizes, dim=0)
+            outcomes = torch.repeat_interleave(outcomes, sizes, dim=0)
+            outcomes_param = [
+                torch.cat(out, 0)
+                for out in outcomes_param
+            ]
+        else:
+            weights = None
+
+        if dist == 'nb':
+            logprob = logprob_nb_positive(outcomes,
+                mu=outcomes_param[0],
+                theta=outcomes_param[1],
+                weight=weights
+            )
+        elif dist == 'zinb':
+            logprob = logprob_zinb_positive(outcomes,
+                mu=outcomes_param[0],
+                theta=outcomes_param[1],
+                zi_logits=outcomes_param[2],
+                weight=weights
+            )
+        elif dist == 'normal':
+            logprob = logprob_normal(outcomes,
+                loc=outcomes_param[0],
+                scale=outcomes_param[1],
+                weight=weights
+            )
+
+        return (logprob.sum(0)/num).mean()
+
+    def loss(self, outcomes, outcomes_dist_samp,
+            cf_outcomes, cf_outcomes_hat,
+            latents_dist, cf_latents_dist):
+        """
+        Compute losses.
+        """
+        # individual-specific likelihood
+        indiv_spec_llh = outcomes_dist_samp.log_prob(
+            outcomes.repeat(self.hparams["mc_sample_size"], 1)
+        ).mean()
+
+        # covariate-specific likelihood
+        if self.dist_mode == 'adversarial':
+            raise NotImplementedError(
+                "TODO: implement dist_mode 'adversarial' for distribution loss")
+        elif self.dist_mode == 'estimate':
+            raise NotImplementedError(
+                "TODO: implement dist_mode 'estimate' for distribution loss")
+        elif self.dist_mode == 'matching':
+            assert cf_outcomes is not None
+            kernel_std = [self.hparams["kde_kernel_std"] * torch.ones_like(o) 
+                for o in cf_outcomes]
+            covar_spec_llh = self.logprob(
+                cf_outcomes_hat, (cf_outcomes, kernel_std), dist='normal'
+            )
+
+        # kl divergence
+        kl_divergence = kldiv_normal(
+            latents_dist.mean,
+            latents_dist.stddev,
+            cf_latents_dist.mean,
+            cf_latents_dist.stddev
+        )
+
+        return (-indiv_spec_llh, -covar_spec_llh, kl_divergence)
+
+    def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates):
+        """
+        Update PotentialOutcomeVI's parameters given a minibatch of outcomes, treatments, and
+        cell types.
+        """
+        outcomes, treatments, cf_outcomes, cf_treatments, covariates = self.move_inputs(
+            outcomes, treatments, cf_outcomes, cf_treatments, covariates
+        )
+
+        latents_constr = self.encode(outcomes, treatments, covariates, detach=False)
+        latents_dist = self.distributionize(
+            latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+        )
+
+        outcomes_constr_samp = self.sample(latents_dist.mean, latents_dist.stddev,
+            treatments, size=self.hparams["mc_sample_size"], detach=False
+        )
+        outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
+
+        cf_outcomes_constr = self.decode(latents_dist.mean, cf_treatments, detach=False)
+        cf_outcomes_hat = self.distributionize(cf_outcomes_constr).mean
+
+        cf_latents_constr = self.encode(
+            cf_outcomes_hat.detach(), treatments, covariates, detach=False
+        )
+        cf_latents_dist = self.distributionize(
+            cf_latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+        )
+
+        indiv_spec_nllh, covar_spec_nllh, kl_divergence = self.loss(
+            outcomes, outcomes_dist_samp,
+            cf_outcomes, cf_outcomes_hat,
+            latents_dist, cf_latents_dist
+        )
+
+        loss = (self.hparams["indiv-spec_lh_weight"] * indiv_spec_nllh
+            + self.hparams["covar-spec_lh_weight"] * covar_spec_nllh
+            + self.hparams["kl_divergence_weight"] * kl_divergence
+        )
+
+        self.optimizer_autoencoder.zero_grad()
+        loss.backward()
+        self.optimizer_autoencoder.step()
+        self.iteration += 1
+
+        return {
+            "Indiv-spec NLLH": indiv_spec_nllh.item(),
+            "Covar-spec NLLH": covar_spec_nllh.item(),
+            "KL Divergence": kl_divergence.item()
+        }
+
+    def early_stopping(self, score):
+        """
+        Decays the learning rate, and possibly early-stops training.
+        """
+        self.scheduler_autoencoder.step()
+
+        if score > self.best_score:
+            self.best_score = score
+            self.patience_trials = 0
+        else:
+            self.patience_trials += 1
+
+        return self.patience_trials > self.patience
+
+    def move_input(self, input):
+        """
+        Move minibatch tensors to CPU/GPU.
+        """
+        if isinstance(input, list):
+            return [i.to(self.device) for i in input]
+        else:
+            return input.to(self.device)
+
+    def move_inputs(self, *inputs: torch.Tensor):
+        """
+        Move minibatch tensors to CPU/GPU.
+        """
+        return [self.move_input(i) if i is not None else None for i in inputs]
+
+    @classmethod
+    def defaults(self):
+        """
+        Returns the list of default hyper-parameters for PotentialOutcomeVI
+        """
+
+        return self.set_hparams_(self, "")

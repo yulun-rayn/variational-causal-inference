@@ -33,7 +33,7 @@ class Dataset:
         split_key=None,
         test_ratio=0.2,
         random_state=42,
-        dist_mode='match',
+        dist_mode='matching',
         cf_samples=30
     ):
         if type(data) == str:
@@ -61,7 +61,7 @@ class Dataset:
             data.obs['dummy_dose'] = 1.0
             dose_key = 'dummy_dose'
         else:
-            assert dist_mode != 'match', f"Dose {dose_key} cannot be handled with dist_mode 'match'"
+            assert dist_mode != 'matching', f"Dose {dose_key} cannot be handled with dist_mode 'matching'"
             assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
         # If no split, create split
         if split_key is None:
@@ -206,7 +206,7 @@ class Dataset:
             cf_genes = None
         elif self.dist_mode == 'estimate':
             cf_genes = None
-        elif self.dist_mode == 'match':
+        elif self.dist_mode == 'matching':
             covariate_name = [indx(self.covariate_names[cov], i) for cov in list(self.covariate_names)]
 
             cf_pert_name = self.control_name
@@ -277,7 +277,7 @@ class SubDataset:
             cf_genes = None
         elif self.dist_mode == 'estimate':
             cf_genes = None
-        elif self.dist_mode == 'match':
+        elif self.dist_mode == 'matching':
             covariate_name = [indx(self.covariate_names[cov], i) for cov in list(self.covariate_names)]
 
             cf_pert_name = self.control_name
@@ -616,10 +616,10 @@ def data_collate(batch):
             numel = sum(x.numel() for x in batch)
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage).resize_(len(batch), *list(elem.size()))
-        try:
-            return torch.stack(batch, 0, out=out)
-        except RuntimeError:
+        if elem.dim() > 1:
             return list(batch)
+        else:
+            return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':

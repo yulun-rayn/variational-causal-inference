@@ -22,6 +22,14 @@ def logprob_normal(x, loc, scale, weight=None, eps=1e-8):
         res = res * weight
     return res
 
+def kldiv_normal(mu1: torch.Tensor, sigma1: torch.Tensor,
+        mu2: torch.Tensor, sigma2: torch.Tensor) -> torch.Tensor:
+    logvar1 = 2 * sigma1.log()
+    logvar2 = 2 * sigma2.log()
+
+    return torch.mean(-0.5 * torch.sum(1. + logvar1-logvar2 
+        - (mu1-mu2)** 2 - (logvar1-logvar2).exp(), dim = 1), dim = 0)
+
 def logprob_zinb_positive(
     x: torch.Tensor,
     mu: torch.Tensor,

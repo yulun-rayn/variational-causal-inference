@@ -1,4 +1,4 @@
-from train.train import train_dpi
+from train.train import train
 
 import argparse
 
@@ -14,7 +14,8 @@ def parse_arguments():
     parser.add_argument("--artifact_path", type=str, required=True)
 
     # mode argument
-    parser.add_argument("--dist_mode", type=str, default="match", help='classify;estimate;match')
+    parser.add_argument("--dist_mode", type=str, default="matching", help='adversarial;estimate;matching')
+    parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
 
     # dataset arguments
     parser.add_argument("--data", type=str, required=True)
@@ -24,10 +25,9 @@ def parse_arguments():
     parser.add_argument("--covariate_keys", nargs="*", type=str, default=[])
     parser.add_argument("--split_key", type=str, default=None)
 
-    # DPI arguments
+    # model arguments
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hparams", type=str, default="") # see set_hparams_() in dpi.model.DPI
-    parser.add_argument("--loss_ae", type=str, default="normal", help='nb;zinb;normal')
+    parser.add_argument("--hparams", type=str, default="") # see set_hparams_() in model.model
 
     # training arguments
     parser.add_argument("--max_epochs", type=int, default=2000)
@@ -35,10 +35,8 @@ def parse_arguments():
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--checkpoint_freq", type=int, default=20)
 
-    # number of trials when executing dpi.sweep
-    parser.add_argument("--sweep_seeds", type=int, default=200)
     return dict(vars(parser.parse_args()))
 
 
 if __name__ == "__main__":
-    train_dpi(parse_arguments())
+    train(parse_arguments())

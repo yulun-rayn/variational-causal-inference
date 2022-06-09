@@ -1,7 +1,11 @@
 import warnings
-from typing import Optional, Tuple, Union
+from abc import abstractmethod
+from typing import Any, List, Optional, Tuple, Union
+
+import numpy as np
 
 import torch
+from torch import nn
 from torch.distributions import Distribution, Gamma, Poisson, constraints
 from torch.distributions.utils import (
     broadcast_all,
@@ -16,6 +20,7 @@ from utils.math_utils import (
     convert_counts_logits_to_mean_disp, 
     convert_mean_disp_to_counts_logits
 )
+
 
 class MLP(torch.nn.Module):
     """
@@ -40,49 +45,6 @@ class MLP(torch.nn.Module):
 
     def forward(self, x):
         return self.network(x)
-
-
-class GeneralizedSigmoid(torch.nn.Module):
-    """
-    Sigmoid, log-sigmoid or linear functions for encoding dose-response for
-    drug perurbations.
-    """
-
-    def __init__(self, dim, device, nonlin="sigmoid"):
-        """Sigmoid modeling of continuous variable.
-        Params
-        ------
-        nonlin : str (default: logsigm)
-            One of logsigm, sigm.
-        """
-        super(GeneralizedSigmoid, self).__init__()
-        self.nonlin = nonlin
-        self.beta = torch.nn.Parameter(
-            torch.ones(1, dim, device=device), requires_grad=True
-        )
-        self.bias = torch.nn.Parameter(
-            torch.zeros(1, dim, device=device), requires_grad=True
-        )
-
-    def forward(self, x):
-        if self.nonlin == "logsigm":
-            c0 = self.bias.sigmoid()
-            return (torch.log1p(x) * self.beta + self.bias).sigmoid() - c0
-        elif self.nonlin == "sigm":
-            c0 = self.bias.sigmoid()
-            return (x * self.beta + self.bias).sigmoid() - c0
-        else:
-            return x
-
-    def one_drug(self, x, i):
-        if self.nonlin == "logsigm":
-            c0 = self.bias[0][i].sigmoid()
-            return (torch.log1p(x) * self.beta[0][i] + self.bias[0][i]).sigmoid() - c0
-        elif self.nonlin == "sigm":
-            c0 = self.bias[0][i].sigmoid()
-            return (x * self.beta[0][i] + self.bias[0][i]).sigmoid() - c0
-        else:
-            return x
 
 
 class NegativeBinomial(Distribution):
