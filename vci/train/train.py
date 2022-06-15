@@ -21,8 +21,7 @@ def prepare(args, state_dict=None):
     Instantiates model and dataset to run an experiment.
     """
 
-    #device = "cuda" if torch.cuda.is_available() else "cpu"
-    device = "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     datasets = load_dataset_splits(
         args["data"],
@@ -64,7 +63,7 @@ def train(args, return_model=False):
                 datasets["training"],
                 batch_size=model.hparams["batch_size"],
                 shuffle=True,
-                collate_fn=data_collate
+                collate_fn=(lambda batch: data_collate(batch, nb_dims=1))
             )
         }
     )

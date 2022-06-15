@@ -48,7 +48,9 @@ class PotentialOutcomeVI(torch.nn.Module):
         embed_treatments=False,
         embed_covariates=True,
         outcome_dist="normal",
-        dist_mode='matching',
+        dist_mode='match',
+        encoder_model=MLP,
+        decoder_model=MLP,
         patience=5,
         seed=0,
         device="cuda",
@@ -87,49 +89,49 @@ class PotentialOutcomeVI(torch.nn.Module):
         # input embeddings
         if self.embed_outcomes:
             self.outcomes_embeddings = MLP(
-                [num_outcomes, self.hparams["encoder_width"]]
+                [num_outcomes, self.hparams["outcome_emb_dim"]], final_act='relu'
             )
-            outcome_dim = self.hparams["encoder_width"]
+            outcome_dim = self.hparams["outcome_emb_dim"]
             params.extend(list(self.outcomes_embeddings.parameters()))
         else:
             outcome_dim = num_outcomes
 
         if self.embed_treatments:
             self.treatments_embeddings = torch.nn.Embedding(
-                self.num_treatments, self.hparams["encoder_width"]
+                self.num_treatments, self.hparams["treatment_emb_dim"]
             )
-            treatment_dim = self.hparams["encoder_width"]
+            treatment_dim = self.hparams["treatment_emb_dim"]
             params.extend(list(self.treatments_embeddings.parameters()))
         else:
             treatment_dim = num_treatments
 
         if self.embed_covariates:
-            covariates_emb_dim = self.hparams["encoder_width"]//len(self.num_covariates)
             self.covariates_embeddings = []
             for num_covariate in self.num_covariates:
                 self.covariates_embeddings.append(
                     torch.nn.Embedding(num_covariate, 
-                        covariates_emb_dim
+                        self.hparams["covariate_emb_dim"]
                     )
                 )
             self.covariates_embeddings = torch.nn.Sequential(
                 *self.covariates_embeddings
             )
-            covariate_dim = covariates_emb_dim*len(self.num_covariates)
+            covariate_dim = self.hparams["covariate_emb_dim"]*len(self.num_covariates)
             for emb in self.covariates_embeddings:
                 params.extend(list(emb.parameters()))
         else:
             covariate_dim = sum(num_covariates)
 
         # individual-specific model
-        self.encoder = MLP(
+        self.encoder = encoder_model(
             [outcome_dim+treatment_dim+covariate_dim]
             + [self.hparams["encoder_width"]] * self.hparams["encoder_depth"]
-            + [self.hparams["latent_dim"] * 2]
+            + [self.hparams["latent_dim"] * 2],
+            final_act='relu'
         )
         params.extend(list(self.encoder.parameters()))
 
-        self.decoder = MLP(
+        self.decoder = decoder_model(
             [self.hparams["latent_dim"]+treatment_dim]
             + [self.hparams["decoder_width"]] * self.hparams["decoder_depth"]
             + [num_outcomes * self.num_dist_params]
@@ -146,37 +148,39 @@ class PotentialOutcomeVI(torch.nn.Module):
         )
 
         # covariate-specific model
-        if self.dist_mode == 'adversarial':
-            self.treatment_discriminator = MLP(
+        if self.dist_mode == 'classify':
+            self.treatment_classifier = MLP(
                 [num_outcomes]
-                + [self.hparams["discriminator_width"]] * self.hparams["discriminator_depth"]
-                + [num_treatments]
+                + [self.hparams["classifier_width"]] * self.hparams["classifier_depth"]
+                + [num_treatments],
+                final_act='softmax'
             )
-            self.loss_treatment_discriminator = torch.nn.CrossEntropyLoss()
-            params = list(self.treatment_discriminator.parameters())
+            self.loss_treatment_classifier = torch.nn.CrossEntropyLoss()
+            params = list(self.treatment_classifier.parameters())
 
-            self.covariate_discriminator = []
-            self.loss_covariate_discriminator = []
+            self.covariate_classifier = []
+            self.loss_covariate_classifier = []
             for num_covariate in self.num_covariates:
                 adv = MLP(
                     [num_outcomes]
-                    + [self.hparams["discriminator_width"]]
-                        * self.hparams["discriminator_depth"]
-                    + [num_covariate]
+                    + [self.hparams["classifier_width"]]
+                        * self.hparams["classifier_depth"]
+                    + [num_covariate],
+                    final_act=(None if num_covariate==1 else 'softmax')
                 )
-                self.covariate_discriminator.append(adv)
-                self.loss_covariate_discriminator.append(torch.nn.CrossEntropyLoss())
+                self.covariate_classifier.append(adv)
+                self.loss_covariate_classifier.append(torch.nn.CrossEntropyLoss())
                 params.extend(list(adv.parameters()))
 
-            self.optimizer_discriminator = torch.optim.Adam(
+            self.optimizer_classifier = torch.optim.Adam(
                 params,
-                lr=self.hparams["discriminator_lr"],
-                weight_decay=self.hparams["discriminator_wd"],
+                lr=self.hparams["classifier_lr"],
+                weight_decay=self.hparams["classifier_wd"],
             )
-            self.scheduler_discriminator = torch.optim.lr_scheduler.StepLR(
-                self.optimizer_discriminator, step_size=self.hparams["step_size_lr"]
+            self.scheduler_classifier = torch.optim.lr_scheduler.StepLR(
+                self.optimizer_classifier, step_size=self.hparams["step_size_lr"]
             )
-        elif self.dist_mode == 'estimate':
+        elif self.dist_mode == 'fit':
             self.outcome_estimator = MLP(
                 [treatment_dim+covariate_dim]
                 + [self.hparams["estimator_width"]] * self.hparams["estimator_depth"]
@@ -193,7 +197,7 @@ class PotentialOutcomeVI(torch.nn.Module):
             self.scheduler_estimator = torch.optim.lr_scheduler.StepLR(
                 self.optimizer_estimator, step_size=self.hparams["step_size_lr"]
             )
-        elif self.dist_mode == 'matching':
+        elif self.dist_mode == 'match':
             pass
         else:
             raise ValueError("dist_mode not recognized")
@@ -212,14 +216,15 @@ class PotentialOutcomeVI(torch.nn.Module):
 
         self.hparams = {
             "latent_dim": 128,
-            "dosers_width": 128,
-            "dosers_depth": 2,
+            "outcome_emb_dim": 256,
+            "treatment_emb_dim": 64,
+            "covariate_emb_dim": 16,
             "encoder_width": 128,
             "encoder_depth": 2,
             "decoder_width": 128,
             "decoder_depth": 2,
-            "discriminator_width": 64,
-            "discriminator_depth": 2,
+            "classifier_width": 64,
+            "classifier_depth": 2,
             "estimator_width": 64,
             "estimator_depth": 2,
             "indiv-spec_lh_weight": 1.0,
@@ -228,10 +233,10 @@ class PotentialOutcomeVI(torch.nn.Module):
             "mc_sample_size": 30,
             "kde_kernel_std": 1.,
             "autoencoder_lr": 3e-4,
-            "discriminator_lr": 3e-4,
+            "classifier_lr": 3e-4,
             "estimator_lr": 3e-4,
             "autoencoder_wd": 4e-7,
-            "discriminator_wd": 4e-7,
+            "classifier_wd": 4e-7,
             "estimator_wd": 4e-7,
             "batch_size": 64,
             "step_size_lr": 45,
@@ -256,7 +261,7 @@ class PotentialOutcomeVI(torch.nn.Module):
                 for covar, emb in zip(covariates, self.covariates_embeddings)
             ]
 
-        inputs = torch.cat([outcomes, treatments] + covariates, 1)
+        inputs = torch.cat([outcomes, treatments] + covariates, -1)
 
         if detach:
             with torch.autograd.no_grad():
@@ -271,7 +276,7 @@ class PotentialOutcomeVI(torch.nn.Module):
         if self.embed_treatments:
             treatments = self.treatments_embeddings(treatments.argmax(1))
 
-        inputs = torch.cat([latents, treatments], 1)
+        inputs = torch.cat([latents, treatments], -1)
 
         if detach:
             with torch.autograd.no_grad():
@@ -460,14 +465,17 @@ class PotentialOutcomeVI(torch.nn.Module):
         ).mean()
 
         # covariate-specific likelihood
-        if self.dist_mode == 'adversarial':
+        if self.dist_mode == 'classify':
             raise NotImplementedError(
-                "TODO: implement dist_mode 'adversarial' for distribution loss")
-        elif self.dist_mode == 'estimate':
+                "TODO: implement dist_mode 'classify' for distribution loss")
+        elif self.dist_mode == 'fit':
             raise NotImplementedError(
-                "TODO: implement dist_mode 'estimate' for distribution loss")
-        elif self.dist_mode == 'matching':
-            assert cf_outcomes is not None
+                "TODO: implement dist_mode 'fit' for distribution loss")
+        elif self.dist_mode == 'match':
+            notNone = [o != None for o in cf_outcomes]
+            cf_outcomes = [o for (o, n) in zip(cf_outcomes, notNone) if n]
+            cf_outcomes_hat = cf_outcomes_hat[notNone]
+
             kernel_std = [self.hparams["kde_kernel_std"] * torch.ones_like(o) 
                 for o in cf_outcomes]
             covar_spec_llh = self.logprob(
@@ -554,7 +562,7 @@ class PotentialOutcomeVI(torch.nn.Module):
         Move minibatch tensors to CPU/GPU.
         """
         if isinstance(input, list):
-            return [i.to(self.device) for i in input]
+            return [i.to(self.device) if i is not None else None for i in input]
         else:
             return input.to(self.device)
 

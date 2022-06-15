@@ -3,13 +3,12 @@ import sys
 import random
 import collections
 from typing import Union
+from itertools import groupby
 
 import scipy
 import numpy as np
 import pandas as pd
 import scanpy as sc
-
-from sklearn.preprocessing import OneHotEncoder
 
 import torch
 from torch._six import string_classes
@@ -33,8 +32,8 @@ class Dataset:
         split_key=None,
         test_ratio=0.2,
         random_state=42,
-        dist_mode='matching',
-        cf_samples=30
+        dist_mode='match',
+        cf_samples=20
     ):
         if type(data) == str:
             data = sc.read(data)
@@ -61,7 +60,6 @@ class Dataset:
             data.obs['dummy_dose'] = 1.0
             dose_key = 'dummy_dose'
         else:
-            assert dist_mode != 'matching', f"Dose {dose_key} cannot be handled with dist_mode 'matching'"
             assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
         # If no split, create split
         if split_key is None:
@@ -92,9 +90,9 @@ class Dataset:
         self.dose_key = dose_key
         self.covariate_keys = covariate_keys
 
-        self.control_name = list(
-            np.unique(data[data.obs[self.control_key] == 1].obs[self.perturbation_key])
-        ) # TODO(Y): remove this in the future
+        self.control_name = np.unique(
+            data[data.obs[self.control_key] == 1].obs[self.perturbation_key]
+        )[0]
 
         if scipy.sparse.issparse(data.X):
             self.genes = torch.Tensor(data.X.A)
@@ -107,89 +105,59 @@ class Dataset:
             data, [perturbation_key, dose_key] + covariate_keys
         )
 
-        if not ("cov_pert_name" in data.obs) or replaced:
-            print("Creating 'cov_pert_name' field.")
-            cov_pert_name = []
-            for i in range(len(data)):
-                comb_name = ""
-                for cov_key in self.covariate_keys:
-                    comb_name += f"{data.obs[cov_key].values[i]}_"
-                comb_name += f"{data.obs[perturbation_key].values[i]}"
-                cov_pert_name.append(comb_name)
-            data.obs["cov_pert_name"] = cov_pert_name
-
-        if not ("rank_genes_groups_cov" in data.uns) or replaced:
-            print("Ranking genes for DE genes.")
-            rank_genes_groups(data, groupby="cov_pert_name", control_key=control_key)
-
-        self.cov_pert = np.array(data.obs["cov_pert_name"].values)
-        self.de_genes = data.uns["rank_genes_groups_cov"]
-
         self.pert_names = np.array(data.obs[perturbation_key].values)
         self.doses = np.array(data.obs[dose_key].values)
 
         # get unique perturbations
-        pert_unique = set()
-        for d in self.pert_names:
-            [pert_unique.add(i) for i in d.split("+")]
-        pert_unique = np.array(list(pert_unique))
-
-        # encode perturbations
-        encoder_pert = OneHotEncoder(sparse=False)
-        encoder_pert.fit(pert_unique.reshape(-1, 1))
+        pert_unique = np.array(self.get_unique_perts())
 
         # store as attribute for molecular featurisation
-        pert_unique_onehot = encoder_pert.transform(pert_unique.reshape(-1, 1))
+        pert_unique_onehot = torch.eye(len(pert_unique))
 
         self.perts_dict = dict(
-            zip(
-                pert_unique,
-                torch.Tensor(pert_unique_onehot),
-            )
+            zip(pert_unique, pert_unique_onehot)
         )
+        if self.control_name not in self.perts_dict.keys():
+            self.perts_dict[self.control_name] = torch.zeros(len(pert_unique))
 
         # get perturbation combinations
         perturbations = []
         for i, comb in enumerate(self.pert_names):
-            perturbation_combos = encoder_pert.transform(
-                np.array(comb.split("+")).reshape(-1, 1)
-            )
+            perturbation_combos = [self.perts_dict[p] for p in comb.split("+")]
             dose_combos = str(data.obs[dose_key].values[i]).split("+")
             perturbation_ohe = []
             for j, d in enumerate(dose_combos):
                 perturbation_ohe.append(float(d) * perturbation_combos[j])
             perturbations.append(sum(perturbation_ohe))
-        self.perturbations = torch.Tensor(perturbations)
+        self.perturbations = torch.stack(perturbations)
 
         self.controls = data.obs[self.control_key].values.astype(bool)
 
         if covariate_keys is not None:
             if not len(covariate_keys) == len(set(covariate_keys)):
                 raise ValueError(f"Duplicate keys were given in: {covariate_keys}")
-            self.covariate_names = {}
+            cov_names = []
             self.covars_dict = {}
             self.covariates = []
             self.num_covariates = []
             for cov in covariate_keys:
-                self.covariate_names[cov] = np.array(data.obs[cov].values)
+                values = np.array(data.obs[cov].values)
+                cov_names.append(values)
 
-                names = np.unique(self.covariate_names[cov])
+                names = np.unique(values)
                 self.num_covariates.append(len(names))
 
-                encoder_cov = OneHotEncoder(sparse=False)
-                encoder_cov.fit(names.reshape(-1, 1))
-
-                names_onehot = encoder_cov.transform(names.reshape(-1, 1))
+                names_onehot = torch.eye(len(names))
                 self.covars_dict[cov] = dict(
-                    zip(list(names), torch.Tensor(names_onehot))
+                    zip(list(names), names_onehot)
                 )
 
-                names = self.covariate_names[cov]
                 self.covariates.append(
-                    torch.Tensor(encoder_cov.transform(names.reshape(-1, 1)))
+                    torch.stack([self.covars_dict[cov][v] for v in values])
                 )
+            self.cov_names = np.array(["_".join(c) for c in zip(*cov_names)])
         else:
-            self.covariate_names = None
+            self.cov_names = np.array([""] * len(data))
             self.covars_dict = None
             self.covariates = None
             self.num_covariates = None
@@ -197,33 +165,70 @@ class Dataset:
         self.num_genes = self.genes.shape[1]
         self.num_perturbations = len(pert_unique)
 
+        self.cov_pert = np.array([
+            f"{self.cov_names[i]}_"
+            f"{data.obs[perturbation_key].values[i]}"
+            for i in range(len(data))
+        ])
+        self.pert_dose = np.array([
+            f"{data.obs[perturbation_key].values[i]}"
+            f"_{data.obs[dose_key].values[i]}"
+            for i in range(len(data))
+        ])
+        self.cov_pert_dose = np.array([
+            f"{self.cov_names[i]}_{self.pert_dose[i]}"
+            for i in range(len(data))
+        ])
+
+        if not ("rank_genes_groups_cov" in data.uns) or replaced:
+            data.obs["cov_name"] = self.cov_names
+            data.obs["cov_pert_name"] = self.cov_pert
+            print("Ranking genes for DE genes.")
+            rank_genes_groups(data,
+                groupby="cov_pert_name", 
+                reference="cov_name",
+                control_key=control_key)
+        self.de_genes = data.uns["rank_genes_groups_cov"]
+
+    def get_unique_perts(self, all_perts=None):
+        if all_perts is None:
+            all_perts = self.pert_names
+        perts = [i for p in all_perts for i in p.split("+")]
+        return [p[0] for p in groupby(perts)]
+
     def subset(self, split, condition="all"):
         idx = list(set(self.indices[split]) & set(self.indices[condition]))
         return SubDataset(self, idx)
 
     def __getitem__(self, i):
         if self.dist_mode == 'classify':
+            cf_i = None
             cf_genes = None
-        elif self.dist_mode == 'estimate':
+        elif self.dist_mode == 'fit':
+            cf_i = None
             cf_genes = None
-        elif self.dist_mode == 'matching':
-            covariate_name = [indx(self.covariate_names[cov], i) for cov in list(self.covariate_names)]
+        elif self.dist_mode == 'match':
+            covariate_name = indx(self.cov_names, i)
 
-            cf_pert_name = self.control_name
-            while cf_pert_name == self.control_name:
-                cf_pert_name = np.random.choice(self.pert_names)
-            cf_name = '_'.join(covariate_name) + f"_{cf_pert_name}"
-            cf_inds = np.nonzero(self.cov_pert==cf_name)[0]
+            cf_pert_dose_name = self.control_name
+            while self.control_name in cf_pert_dose_name:
+                cf_i = np.random.choice(len(self.pert_dose))
+                cf_pert_dose_name = self.pert_dose[cf_i]
+            cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
-            cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
+            if cf_name in self.cov_pert_dose:
+                cf_inds = np.nonzero(self.cov_pert_dose==cf_name)[0]
+                cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
+            else:
+                cf_genes = None
 
         return (
                 self.genes[i],
                 indx(self.perturbations, i),
                 cf_genes,
-                self.perts_dict[cf_pert_name],
+                indx(self.perturbations, cf_i),
                 *[indx(cov, i) for cov in self.covariates]
-            )
+        )
 
     def __len__(self):
         return len(self.genes)
@@ -243,7 +248,7 @@ class SubDataset:
         self.dose_key = dataset.dose_key
         self.covariate_keys = dataset.covariate_keys
 
-        self.control_name = indx(dataset.control_name, 0) #TODO(Y): remove this in the future
+        self.control_name = indx(dataset.control_name, 0)
 
         self.perts_dict = dataset.perts_dict
         self.covars_dict = dataset.covars_dict
@@ -256,10 +261,10 @@ class SubDataset:
         self.pert_names = indx(dataset.pert_names, indices)
         self.doses = indx(dataset.doses, indices)
 
+        self.cov_names = indx(dataset.cov_names, indices)
         self.cov_pert = indx(dataset.cov_pert, indices)
-        self.covariate_names = {}
-        for cov in self.covariate_keys:
-            self.covariate_names[cov] = indx(dataset.covariate_names[cov], indices)
+        self.pert_dose = indx(dataset.pert_dose, indices)
+        self.cov_pert_dose = indx(dataset.cov_pert_dose, indices)
 
         self.var_names = dataset.var_names
         self.de_genes = dataset.de_genes
@@ -274,27 +279,33 @@ class SubDataset:
 
     def __getitem__(self, i):
         if self.dist_mode == 'classify':
+            cf_i = None
             cf_genes = None
-        elif self.dist_mode == 'estimate':
+        elif self.dist_mode == 'fit':
+            cf_i = None
             cf_genes = None
-        elif self.dist_mode == 'matching':
-            covariate_name = [indx(self.covariate_names[cov], i) for cov in list(self.covariate_names)]
+        elif self.dist_mode == 'match':
+            covariate_name = indx(self.cov_names, i)
 
-            cf_pert_name = self.control_name
-            while cf_pert_name == self.control_name:
-                cf_pert_name = np.random.choice(self.pert_names)
-            cf_name = '_'.join(covariate_name) + f"_{cf_pert_name}"
-            cf_inds = np.nonzero(self.cov_pert==cf_name)[0]
+            cf_pert_dose_name = self.control_name
+            while self.control_name in cf_pert_dose_name:
+                cf_i = np.random.choice(len(self.pert_dose))
+                cf_pert_dose_name = self.pert_dose[cf_i]
+            cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
-            cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
+            if cf_name in self.cov_pert_dose:
+                cf_inds = np.nonzero(self.cov_pert_dose==cf_name)[0]
+                cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
+            else:
+                cf_genes = None
 
         return (
                 self.genes[i],
                 indx(self.perturbations, i),
                 cf_genes,
-                self.perts_dict[cf_pert_name],
+                indx(self.perturbations, cf_i),
                 *[indx(cov, i) for cov in self.covariates]
-            )
+        )
 
     def __len__(self):
         return len(self.genes)
@@ -418,6 +429,7 @@ def rank_genes_groups_by_cov(
 def rank_genes_groups(
     adata,
     groupby,
+    reference,
     control_key,
     pool_doses=False,
     n_genes=50,
@@ -475,15 +487,9 @@ def rank_genes_groups(
 
     """
 
-    covars_comb = []
-    for i in range(len(adata)):
-        cov = "_".join(adata.obs["cov_pert_name"].values[i].split("_")[:-1])
-        covars_comb.append(cov)
-    adata.obs["covars_comb"] = covars_comb
-
     gene_dict = {}
-    for cov_cat in np.unique(adata.obs["covars_comb"].values):
-        adata_cov = adata[adata.obs["covars_comb"] == cov_cat]
+    for cov_cat in np.unique(adata.obs[reference].values):
+        adata_cov = adata[adata.obs[reference] == cov_cat]
         control_group_cov = (
             adata_cov[adata_cov.obs[control_key] == 1].obs[groupby].values[0]
         )
@@ -562,7 +568,7 @@ data_collate_err_msg_format = (
     "data_collate: batch must contain tensors, numpy arrays, numbers, "
     "dicts or lists; found {}")
 
-def data_collate(batch):
+def data_collate(batch, nb_dims=1):
     r"""
         Function that takes in a batch of data and puts the elements within the batch
         into a tensor with an additional outer dimension - batch size. The exact output type can be
@@ -608,6 +614,8 @@ def data_collate(batch):
     """
     elem = batch[0]
     elem_type = type(elem)
+    if elem is None:
+        return list(batch)
     if isinstance(elem, torch.Tensor):
         out = None
         if torch.utils.data.get_worker_info() is not None:
@@ -616,7 +624,7 @@ def data_collate(batch):
             numel = sum(x.numel() for x in batch)
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage).resize_(len(batch), *list(elem.size()))
-        if elem.dim() > 1:
+        if elem.dim() > nb_dims:
             return list(batch)
         else:
             return torch.stack(batch, 0, out=out)

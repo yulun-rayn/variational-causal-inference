@@ -27,7 +27,7 @@ class MLP(torch.nn.Module):
     A multilayer perceptron with ReLU activations and optional BatchNorm.
     """
 
-    def __init__(self, sizes, batch_norm=True):
+    def __init__(self, sizes, batch_norm=True, final_act=None):
         super(MLP, self).__init__()
         layers = []
         for s in range(len(sizes) - 1):
@@ -36,10 +36,22 @@ class MLP(torch.nn.Module):
                 torch.nn.BatchNorm1d(sizes[s + 1])
                 if batch_norm and s < len(sizes) - 2
                 else None,
-                torch.nn.ReLU(),
+                torch.nn.ReLU()
+                if s < len(sizes) - 2
+                else None
             ]
+        if final_act is None:
+            pass
+        elif final_act == 'relu':
+            layers += [torch.nn.ReLU()]
+        elif final_act == 'sigmoid':
+            layers += [torch.nn.Sigmoid()]
+        elif final_act == 'softmax':
+            layers += [torch.nn.Softmax(dim=1)]
+        else:
+            raise ValueError("final_act not recognized")
 
-        layers = [l for l in layers if l is not None][:-1]
+        layers = [l for l in layers if l is not None]
 
         self.network = torch.nn.Sequential(*layers)
 

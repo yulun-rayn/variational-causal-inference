@@ -14,7 +14,7 @@ def parse_arguments():
     parser.add_argument("--artifact_path", type=str, required=True)
 
     # mode argument
-    parser.add_argument("--dist_mode", type=str, default="matching", help='adversarial;estimate;matching')
+    parser.add_argument("--dist_mode", type=str, default="match", help='classify;fit;match')
     parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
 
     # dataset arguments
@@ -33,7 +33,7 @@ def parse_arguments():
     parser.add_argument("--max_epochs", type=int, default=2000)
     parser.add_argument("--max_minutes", type=int, default=300)
     parser.add_argument("--patience", type=int, default=20)
-    parser.add_argument("--checkpoint_freq", type=int, default=20)
+    parser.add_argument("--checkpoint_freq", type=int, default=5)
 
     return dict(vars(parser.parse_args()))
 
