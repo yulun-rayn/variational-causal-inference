@@ -7,11 +7,13 @@ def parse_arguments():
     Read arguments if this script is called from a terminal.
     """
 
-    parser = argparse.ArgumentParser(description="Drug combinations.")
+    parser = argparse.ArgumentParser()
 
-    # output arguments
+    # setting arguments
     parser.add_argument('--name', default='default_run')
     parser.add_argument("--artifact_path", type=str, required=True)
+    parser.add_argument('--cpu', action='store_true')
+    parser.add_argument('--gpu', default='0')
 
     # mode argument
     parser.add_argument("--dist_mode", type=str, default="match", help='classify;fit;match')

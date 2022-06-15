@@ -21,7 +21,9 @@ def prepare(args, state_dict=None):
     Instantiates model and dataset to run an experiment.
     """
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device("cpu") if args["cpu"] else torch.device(
+        'cuda:' + str(args["gpu"]) if torch.cuda.is_available() else "cpu"
+    )
 
     datasets = load_dataset_splits(
         args["data"],
