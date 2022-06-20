@@ -11,10 +11,10 @@ from evaluate.evaluate import evaluate
 
 from model.model import PotentialOutcomeVI
 
-from dataset.dataset import load_dataset_splits, data_collate
+from dataset.dataset import load_dataset_splits
 
 from utils.general_utils import pjson
-
+from utils.data_utils import data_collate
 
 def prepare(args, state_dict=None):
     """
@@ -106,8 +106,9 @@ def train(args, return_model=False):
         # decay learning rate if necessary
         # also check stopping condition: patience ran out OR
         # time ran out OR max epochs achieved
-        stop = ellapsed_minutes > args["max_minutes"] or (
-            epoch == args["max_epochs"] - 1
+        stop = (
+            (epoch == args["max_epochs"] - 1) 
+            #or (ellapsed_minutes > args["max_minutes"])
         )
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:

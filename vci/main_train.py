@@ -35,7 +35,7 @@ def parse_arguments():
     parser.add_argument("--max_epochs", type=int, default=2000)
     parser.add_argument("--max_minutes", type=int, default=300)
     parser.add_argument("--patience", type=int, default=20)
-    parser.add_argument("--checkpoint_freq", type=int, default=5)
+    parser.add_argument("--checkpoint_freq", type=int, default=20)
 
     return dict(vars(parser.parse_args()))
 

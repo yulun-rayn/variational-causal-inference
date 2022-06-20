@@ -4,7 +4,7 @@ from sklearn.metrics import r2_score
 
 import torch
 
-def evaluate_r2(model, dataset, dataset_control, min_samples=30):
+def evaluate_r2(model, dataset, dataset_control, batch_size=None, min_samples=30):
     """
     Measures different quality metrics about an `model`, when
     tasked to translate some `genes_control` into each of the perturbation/covariates
@@ -20,6 +20,8 @@ def evaluate_r2(model, dataset, dataset_control, min_samples=30):
     genes_control = dataset_control.genes
     perts_control = dataset_control.perturbations
     num = genes_control.size(0)
+    if batch_size is None:
+        batch_size = num
 
     for pert_category in np.unique(dataset.cov_pert):
         # pert_category category contains: 'cov_pert' info
@@ -37,8 +39,21 @@ def evaluate_r2(model, dataset, dataset_control, min_samples=30):
                 for covar in dataset.covariates
             ]
 
-            yp = model.predict(genes_control, perts_control, perts, covars)
-            yp_m = yp.mean(0).detach().cpu()
+            num_eval = 0
+            yp = []
+            while num_eval < num:
+                end = min(num_eval+batch_size, num)
+                out = model.predict(
+                    genes_control[num_eval:end],
+                    perts_control[num_eval:end],
+                    perts[num_eval:end],
+                    [covar[num_eval:end] for covar in covars]
+                )
+                yp.append(out.detach().cpu())
+
+                num_eval += batch_size
+            yp = torch.cat(yp, 0)
+            yp_m = yp.mean(0)
 
             # true means
             yt = dataset.genes[idx, :].numpy()

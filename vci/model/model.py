@@ -66,7 +66,6 @@ class PotentialOutcomeVI(torch.nn.Module):
         self.embed_covariates = embed_covariates
         self.outcome_dist = outcome_dist
         self.dist_mode=dist_mode
-        self.device = device
         self.seed = seed
         # early-stopping
         self.patience = patience
@@ -204,9 +203,9 @@ class PotentialOutcomeVI(torch.nn.Module):
 
         self.iteration = 0
 
-        self.to(self.device)
-
         self.history = {"epoch": [], "stats_epoch": []}
+
+        self.to_device(device)
 
     def set_hparams_(self, hparams):
         """
@@ -250,7 +249,7 @@ class PotentialOutcomeVI(torch.nn.Module):
                 self.hparams.update(hparams)
 
         return self.hparams
-    
+
     def encode(self, outcomes, treatments, covariates, detach=True):
         if self.embed_outcomes:
             outcomes = self.outcomes_embeddings(outcomes)
@@ -571,6 +570,10 @@ class PotentialOutcomeVI(torch.nn.Module):
         Move minibatch tensors to CPU/GPU.
         """
         return [self.move_input(i) if i is not None else None for i in inputs]
+
+    def to_device(self, device):
+        self.device = device
+        self.to(self.device)
 
     @classmethod
     def defaults(self):
