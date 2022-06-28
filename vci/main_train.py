@@ -17,7 +17,7 @@ def parse_arguments():
 
     # mode argument
     parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
-    parser.add_argument("--dist_mode", type=str, default="discriminate", help='classify;discriminate;fit;match')
+    parser.add_argument("--dist_mode", type=str, default="match", help='classify;discriminate;fit;match')
 
     # dataset arguments
     parser.add_argument("--data", type=str, required=True)

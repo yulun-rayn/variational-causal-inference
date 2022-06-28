@@ -274,7 +274,7 @@ class PotentialOutcomeVI(torch.nn.Module):
             "estimator_width": 64,
             "estimator_depth": 2,
             "indiv-spec_lh_weight": 1.0,
-            "covar-spec_lh_weight": 1.7,
+            "covar-spec_lh_weight": 1.8,
             "kl_divergence_weight": 0.1,
             "mc_sample_size": 30,
             "kde_kernel_std": 1.,
@@ -562,21 +562,25 @@ class PotentialOutcomeVI(torch.nn.Module):
             outcomes, treatments, cf_outcomes, cf_treatments, covariates
         )
 
+        # q(z | y, x, t)
         latents_constr = self.encode(outcomes, treatments, covariates)
         latents_dist = self.distributionize(
             latents_constr, dim=self.hparams["latent_dim"], dist='normal'
         )
 
+        # p(y | z, t)
         outcomes_constr_samp = self.sample(latents_dist.mean, latents_dist.stddev,
             treatments, size=self.hparams["mc_sample_size"]
         )
         outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
 
+        # p(y' | z, t')
         cf_outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
         cf_outcomes_hat = self.distributionize(cf_outcomes_constr).mean
 
+        # q(z | y', x, t')
         cf_latents_constr = self.encode(
-            cf_outcomes_hat.detach(), treatments, covariates
+            cf_outcomes_hat.detach(), cf_treatments, covariates
         )
         cf_latents_dist = self.distributionize(
             cf_latents_constr, dim=self.hparams["latent_dim"], dist='normal'
