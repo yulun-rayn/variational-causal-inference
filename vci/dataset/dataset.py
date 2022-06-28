@@ -1,6 +1,5 @@
 import sys
 from typing import Union
-from itertools import groupby
 
 import scipy
 import numpy as np
@@ -29,7 +28,7 @@ class Dataset:
         split_key=None,
         test_ratio=0.2,
         random_state=42,
-        dist_mode='match',
+        sample_cf=False,
         cf_samples=20
     ):
         if type(data) == str:
@@ -38,7 +37,7 @@ class Dataset:
         assert perturbation_key in data.obs.columns, f"Perturbation {perturbation_key} is missing in the provided adata"
         assert control_key in data.obs.columns, f"Perturbation {control_key} is missing in the provided adata"
 
-        self.dist_mode = dist_mode
+        self.sample_cf = sample_cf
         self.cf_samples = cf_samples
 
         # If no covariates, create dummy covariate
@@ -191,33 +190,26 @@ class Dataset:
         if all_perts is None:
             all_perts = self.pert_names
         perts = [i for p in all_perts for i in p.split("+")]
-        return [p[0] for p in groupby(perts)]
+        return list(dict.fromkeys(perts))
 
     def subset(self, split, condition="all"):
         idx = list(set(self.indices[split]) & set(self.indices[condition]))
         return SubDataset(self, idx)
 
     def __getitem__(self, i):
-        if self.dist_mode == 'classify':
-            cf_i = None
-            cf_genes = None
-        elif self.dist_mode == 'fit':
-            cf_i = None
-            cf_genes = None
-        elif self.dist_mode == 'match':
+        cf_pert_dose_name = self.control_name
+        while self.control_name in cf_pert_dose_name:
+            cf_i = np.random.choice(len(self.pert_dose))
+            cf_pert_dose_name = self.pert_dose[cf_i]
+            
+        cf_genes = None
+        if self.sample_cf:
             covariate_name = indx(self.cov_names, i)
-
-            cf_pert_dose_name = self.control_name
-            while self.control_name in cf_pert_dose_name:
-                cf_i = np.random.choice(len(self.pert_dose))
-                cf_pert_dose_name = self.pert_dose[cf_i]
             cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
             if cf_name in self.cov_pert_dose:
                 cf_inds = np.nonzero(self.cov_pert_dose==cf_name)[0]
                 cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
-            else:
-                cf_genes = None
 
         return (
                 self.genes[i],
@@ -237,7 +229,7 @@ class SubDataset:
     """
 
     def __init__(self, dataset, indices):
-        self.dist_mode = dataset.dist_mode
+        self.sample_cf = dataset.sample_cf
         self.cf_samples = dataset.cf_samples
 
         self.perturbation_key = dataset.perturbation_key
@@ -275,26 +267,19 @@ class SubDataset:
         return SubDataset(self, idx)
 
     def __getitem__(self, i):
-        if self.dist_mode == 'classify':
-            cf_i = None
-            cf_genes = None
-        elif self.dist_mode == 'fit':
-            cf_i = None
-            cf_genes = None
-        elif self.dist_mode == 'match':
-            covariate_name = indx(self.cov_names, i)
+        cf_pert_dose_name = self.control_name
+        while self.control_name in cf_pert_dose_name:
+            cf_i = np.random.choice(len(self.pert_dose))
+            cf_pert_dose_name = self.pert_dose[cf_i]
 
-            cf_pert_dose_name = self.control_name
-            while self.control_name in cf_pert_dose_name:
-                cf_i = np.random.choice(len(self.pert_dose))
-                cf_pert_dose_name = self.pert_dose[cf_i]
+        cf_genes = None
+        if self.sample_cf:
+            covariate_name = indx(self.cov_names, i)
             cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
             if cf_name in self.cov_pert_dose:
                 cf_inds = np.nonzero(self.cov_pert_dose==cf_name)[0]
                 cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
-            else:
-                cf_genes = None
 
         return (
                 self.genes[i],
@@ -314,12 +299,12 @@ def load_dataset_splits(
     dose_key: Union[str, None],
     covariate_keys: Union[list, str, None],
     split_key: Union[str, None],
-    dist_mode: str,
+    sample_cf: bool,
     return_dataset: bool = False,
 ):
 
     dataset = Dataset(
-        data, perturbation_key, control_key, dose_key, covariate_keys, split_key, dist_mode=dist_mode
+        data, perturbation_key, control_key, dose_key, covariate_keys, split_key, sample_cf=sample_cf
     )
 
     splits = {

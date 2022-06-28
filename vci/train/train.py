@@ -32,7 +32,7 @@ def prepare(args, state_dict=None):
         args["dose_key"],
         args["covariate_keys"],
         args["split_key"],
-        args["dist_mode"],
+        True if args["dist_mode"] == 'match' else False,
     )
 
     model = PotentialOutcomeVI(

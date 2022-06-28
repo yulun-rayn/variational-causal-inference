@@ -16,8 +16,8 @@ def parse_arguments():
     parser.add_argument('--gpu', default='0')
 
     # mode argument
-    parser.add_argument("--dist_mode", type=str, default="match", help='classify;fit;match')
     parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
+    parser.add_argument("--dist_mode", type=str, default="discriminate", help='classify;discriminate;fit;match')
 
     # dataset arguments
     parser.add_argument("--data", type=str, required=True)
