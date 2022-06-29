@@ -274,7 +274,7 @@ class PotentialOutcomeVI(torch.nn.Module):
             "estimator_width": 64,
             "estimator_depth": 2,
             "indiv-spec_lh_weight": 1.0,
-            "covar-spec_lh_weight": 1.8,
+            "covar-spec_lh_weight": 1.6,
             "kl_divergence_weight": 0.1,
             "mc_sample_size": 30,
             "kde_kernel_std": 1.,
@@ -504,7 +504,7 @@ class PotentialOutcomeVI(torch.nn.Module):
         return (logprob.sum(0)/num).mean()
 
     def loss(self, outcomes, outcomes_dist_samp,
-            cf_outcomes, cf_outcomes_hat,
+            cf_outcomes, cf_outcomes_out,
             latents_dist, cf_latents_dist,
             treatments, covariates):
         """
@@ -522,12 +522,12 @@ class PotentialOutcomeVI(torch.nn.Module):
         if self.dist_mode == 'discriminate':
             if self.iteration % self.hparams["adversary_steps"]:
                 self.update_discriminator(
-                    outcomes, cf_outcomes_hat.detach(), treatments, covariates
+                    outcomes, cf_outcomes_out.detach(), treatments, covariates
                 )
 
             covar_spec_nllh = self.loss_discriminator(
-                self.discriminate(cf_outcomes_hat, treatments, covariates),
-                torch.ones(cf_outcomes_hat.size(0), device=cf_outcomes_hat.device)
+                self.discriminate(cf_outcomes_out, treatments, covariates),
+                torch.ones(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
             )
         elif self.dist_mode == 'fit':
             raise NotImplementedError(
@@ -535,12 +535,12 @@ class PotentialOutcomeVI(torch.nn.Module):
         elif self.dist_mode == 'match':
             notNone = [o != None for o in cf_outcomes]
             cf_outcomes = [o for (o, n) in zip(cf_outcomes, notNone) if n]
-            cf_outcomes_hat = cf_outcomes_hat[notNone]
+            cf_outcomes_out = cf_outcomes_out[notNone]
 
             kernel_std = [self.hparams["kde_kernel_std"] * torch.ones_like(o) 
                 for o in cf_outcomes]
             covar_spec_nllh = -self.logprob(
-                cf_outcomes_hat, (cf_outcomes, kernel_std), dist='normal'
+                cf_outcomes_out, (cf_outcomes, kernel_std), dist='normal'
             )
 
         # kl divergence
@@ -553,7 +553,8 @@ class PotentialOutcomeVI(torch.nn.Module):
 
         return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
 
-    def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates):
+    def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
+                sample=False, detach_pattern='full'):
         """
         Update PotentialOutcomeVI's parameters given a minibatch of outcomes, treatments, and
         cell types.
@@ -575,12 +576,32 @@ class PotentialOutcomeVI(torch.nn.Module):
         outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
 
         # p(y' | z, t')
-        cf_outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
-        cf_outcomes_hat = self.distributionize(cf_outcomes_constr).mean
+        if sample:
+            cf_outcomes_constr = self.decode(latents_dist.rsample(), cf_treatments)
+            cf_outcomes_out = self.distributionize(cf_outcomes_constr).rsample()
+        else:
+            cf_outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
+            cf_outcomes_out = self.distributionize(cf_outcomes_constr).mean
 
         # q(z | y', x, t')
+        if detach_pattern == None:
+            cf_outcomes_in = cf_outcomes_out
+        if detach_pattern == 'full':
+            cf_outcomes_in = cf_outcomes_out.detach()
+        elif detach_pattern == 'half':
+            if sample:
+                cf_outcomes_in = self.distributionize(
+                    self.decode(latents_dist.sample(), cf_treatments)
+                ).rsample()
+            else:
+                cf_outcomes_in = self.distributionize(
+                    self.decode(latents_dist.mean.detach(), cf_treatments)
+                ).mean
+        else:
+            raise ValueError("Unrecognized: detaching pattern of the counterfactual outcome "
+                "in the KL Divergence term.")
         cf_latents_constr = self.encode(
-            cf_outcomes_hat.detach(), cf_treatments, covariates
+            cf_outcomes_in, cf_treatments, covariates
         )
         cf_latents_dist = self.distributionize(
             cf_latents_constr, dim=self.hparams["latent_dim"], dist='normal'
@@ -588,7 +609,7 @@ class PotentialOutcomeVI(torch.nn.Module):
 
         indiv_spec_nllh, covar_spec_nllh, kl_divergence = self.loss(
             outcomes, outcomes_dist_samp,
-            cf_outcomes, cf_outcomes_hat,
+            cf_outcomes, cf_outcomes_out,
             latents_dist, cf_latents_dist,
             treatments, covariates
         )
@@ -609,15 +630,15 @@ class PotentialOutcomeVI(torch.nn.Module):
             "KL Divergence": kl_divergence.item()
         }
 
-    def update_discriminator(self, outcomes, cf_outcomes_hat, treatments, covariates):
+    def update_discriminator(self, outcomes, cf_outcomes_out, treatments, covariates):
         loss_tru = self.loss_discriminator(
             self.discriminate(outcomes, treatments, covariates),
             torch.ones(outcomes.size(0), device=outcomes.device)
         )
 
         loss_fls = self.loss_discriminator(
-            self.discriminate(cf_outcomes_hat, treatments, covariates),
-            torch.zeros(cf_outcomes_hat.size(0), device=cf_outcomes_hat.device)
+            self.discriminate(cf_outcomes_out, treatments, covariates),
+            torch.zeros(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
         )
 
         loss = (loss_tru+loss_fls)/2.
