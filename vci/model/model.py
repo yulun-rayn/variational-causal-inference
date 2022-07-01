@@ -274,7 +274,7 @@ class PotentialOutcomeVI(torch.nn.Module):
             "estimator_width": 64,
             "estimator_depth": 2,
             "indiv-spec_lh_weight": 1.0,
-            "covar-spec_lh_weight": 1.6,
+            "covar-spec_lh_weight": 1.7,
             "kl_divergence_weight": 0.1,
             "mc_sample_size": 30,
             "kde_kernel_std": 1.,
@@ -554,7 +554,7 @@ class PotentialOutcomeVI(torch.nn.Module):
         return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
 
     def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
-                sample=False, detach_pattern='full'):
+                sample=True, detach_pattern=None):
         """
         Update PotentialOutcomeVI's parameters given a minibatch of outcomes, treatments, and
         cell types.
