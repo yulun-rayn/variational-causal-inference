@@ -17,7 +17,7 @@ from utils.math_utils import (
 #                     LOAD MODEL                    #
 #####################################################
 
-def load_POVI(args, state_dict=None):
+def load_VCI(args, state_dict=None):
     device = (
         torch.device("cuda:" + str(args["gpu"]))
             if (not args["cpu"]) 
@@ -26,7 +26,7 @@ def load_POVI(args, state_dict=None):
         torch.device("cpu")
     )
 
-    model = PotentialOutcomeVI(
+    model = VCI(
         args["num_outcomes"],
         args["num_treatments"],
         args["num_covariates"],
@@ -46,7 +46,7 @@ def load_POVI(args, state_dict=None):
 #                     MAIN MODEL                    #
 #####################################################
 
-class PotentialOutcomeVI(torch.nn.Module):
+class VCI(torch.nn.Module):
     def __init__(
         self,
         num_outcomes,
@@ -63,7 +63,7 @@ class PotentialOutcomeVI(torch.nn.Module):
         device="cuda",
         hparams=""
     ):
-        super(PotentialOutcomeVI, self).__init__()
+        super(VCI, self).__init__()
         # set generic attributes
         self.num_outcomes = num_outcomes
         self.num_treatments = num_treatments
@@ -595,7 +595,7 @@ class PotentialOutcomeVI(torch.nn.Module):
     def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
                 sample=True, detach_pattern=None):
         """
-        Update PotentialOutcomeVI's parameters given a minibatch of outcomes, treatments, and
+        Update VCI's parameters given a minibatch of outcomes, treatments, and
         cell types.
         """
         outcomes, treatments, cf_outcomes, cf_treatments, covariates = self.move_inputs(
@@ -686,6 +686,14 @@ class PotentialOutcomeVI(torch.nn.Module):
         self.optimizer_discriminator.step()
 
         return loss.item()
+    
+    def estimate(self):
+        # TODO
+        pass
+
+    def estimate_ATE(self):
+        # TODO
+        pass
 
     def early_stopping(self, score):
         """
@@ -723,7 +731,7 @@ class PotentialOutcomeVI(torch.nn.Module):
     @classmethod
     def defaults(self):
         """
-        Returns the list of default hyper-parameters for PotentialOutcomeVI
+        Returns the list of default hyper-parameters for VCI
         """
 
         return self._set_hparams_(self, "")
