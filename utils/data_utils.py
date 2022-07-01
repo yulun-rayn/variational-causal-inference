@@ -104,7 +104,7 @@ def data_collate(batch, nb_dims=1):
         it = iter(batch)
         elem_size = len(next(it))
         if not all(len(elem) == elem_size for elem in it):
-            raise RuntimeError('each element in list of batch should be of equal size')
+            raise RuntimeError("each element in list of batch should be of equal size")
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
 
         if isinstance(elem, tuple):

@@ -43,8 +43,8 @@ class Dataset:
         # If no covariates, create dummy covariate
         if covariate_keys is None or len(covariate_keys)==0:
             print("Adding a dummy covariate...")
-            data.obs['dummy_covar'] = 'dummy_covar'
-            covariate_keys = ['dummy_covar']
+            data.obs["dummy_covar"] = "dummy_covar"
+            covariate_keys = ["dummy_covar"]
         else:
             if not isinstance(covariate_keys, list):
                 covariate_keys = [covariate_keys]
@@ -53,8 +53,8 @@ class Dataset:
         # If no dose, create dummy dose
         if dose_key is None:
             print("Adding a dummy dose...")
-            data.obs['dummy_dose'] = 1.0
-            dose_key = 'dummy_dose'
+            data.obs["dummy_dose"] = 1.0
+            dose_key = "dummy_dose"
         else:
             assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
         # If no split, create split
@@ -62,13 +62,13 @@ class Dataset:
             print(f"Performing automatic train-test split with {test_ratio} ratio.")
             from sklearn.model_selection import train_test_split
 
-            data.obs['split'] = "train"
+            data.obs["split"] = "train"
             idx_train, idx_test = train_test_split(
                 data.obs_names, test_size=test_ratio, random_state=random_state
             )
-            data.obs['split'].loc[idx_train] = "train"
-            data.obs['split'].loc[idx_test] = "test"
-            split_key = 'split'
+            data.obs["split"].loc[idx_train] = "train"
+            data.obs["split"].loc[idx_test] = "test"
+            split_key = "split"
         else:
             assert split_key in data.obs.columns, f"Split {split_key} is missing in the provided adata"
 
@@ -93,7 +93,7 @@ class Dataset:
         if scipy.sparse.issparse(data.X):
             self.genes = torch.Tensor(data.X.A)
         else:
-            self.genes = torch.Tensor(data.X) # data.layers['counts']
+            self.genes = torch.Tensor(data.X) # data.layers["counts"]
 
         self.var_names = data.var_names
 

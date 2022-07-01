@@ -28,7 +28,7 @@ def prepare(args, state_dict=None):
         args["dose_key"],
         args["covariate_keys"],
         args["split_key"],
-        True if args["dist_mode"] == 'match' else False,
+        True if args["dist_mode"] == "match" else False,
     )
 
     args["num_outcomes"] = datasets["training"].num_genes
@@ -64,7 +64,7 @@ def train(args, return_model=False):
     args["hparams"] = model.hparams
 
     dt = datetime.now().strftime("%Y.%m.%d_%H:%M:%S")
-    save_dir = os.path.join(args["artifact_path"], 'saves/' + args["name"] + '_' + dt)
+    save_dir = os.path.join(args["artifact_path"], "saves/" + args["name"] + "_" + dt)
     os.makedirs(save_dir, exist_ok=True)
 
     start_time = time.time()

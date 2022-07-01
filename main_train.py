@@ -10,10 +10,10 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
 
     # setting arguments
-    parser.add_argument('--name', default='default_run')
+    parser.add_argument("--name", default="default_run")
     parser.add_argument("--artifact_path", type=str, required=True)
-    parser.add_argument('--cpu', action='store_true')
-    parser.add_argument('--gpu', default='0')
+    parser.add_argument("--cpu", action="store_true")
+    parser.add_argument("--gpu", default="0")
 
     # dataset arguments
     parser.add_argument("--data", type=str, required=True)
@@ -24,8 +24,8 @@ def parse_arguments():
     parser.add_argument("--split_key", type=str, default=None)
 
     # model arguments
-    parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
-    parser.add_argument("--dist_mode", type=str, default="match", help='classify;discriminate;fit;match')
+    parser.add_argument("--outcome_dist", type=str, default="normal", help="nb;zinb;normal")
+    parser.add_argument("--dist_mode", type=str, default="match", help="classify;discriminate;fit;match")
     parser.add_argument("--hparams", type=str, default="hparams.json")
 
     # training arguments

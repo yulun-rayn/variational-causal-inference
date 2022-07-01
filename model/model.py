@@ -55,7 +55,7 @@ class VCI(torch.nn.Module):
         embed_treatments=False,
         embed_covariates=True,
         outcome_dist="normal",
-        dist_mode='match',
+        dist_mode="match",
         best_score=-1e3,
         patience=5,
         device="cuda",
@@ -76,11 +76,11 @@ class VCI(torch.nn.Module):
         self.patience = patience
         self.patience_trials = 0
         # distribution parameters
-        if self.outcome_dist == 'nb':
+        if self.outcome_dist == "nb":
             self.num_dist_params = 2
-        elif self.outcome_dist == 'zinb':
+        elif self.outcome_dist == "zinb":
             self.num_dist_params = 3
-        elif self.outcome_dist == 'normal':
+        elif self.outcome_dist == "normal":
             self.num_dist_params = 2
         else:
             raise ValueError("outcome_dist not recognized")
@@ -156,7 +156,7 @@ class VCI(torch.nn.Module):
         # embeddings
         if self.embed_outcomes:
             self.outcomes_embeddings = MLP(
-                [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act='relu'
+                [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act="relu"
             )
             outcome_dim = self.hparams["outcome_emb_dim"]
             params.extend(list(self.outcomes_embeddings.parameters()))
@@ -194,7 +194,7 @@ class VCI(torch.nn.Module):
             [outcome_dim+treatment_dim+covariate_dim]
             + [self.hparams["encoder_width"]] * self.hparams["encoder_depth"]
             + [self.hparams["latent_dim"] * 2],
-            final_act='relu'
+            final_act="relu"
         )
         params.extend(list(self.encoder.parameters()))
 
@@ -218,7 +218,7 @@ class VCI(torch.nn.Module):
 
     def _init_covar_model(self):
 
-        if self.dist_mode == 'classify':
+        if self.dist_mode == "classify":
             self.treatment_classifier = MLP(
                 [self.num_outcomes]
                 + [self.hparams["classifier_width"]] * self.hparams["classifier_depth"]
@@ -235,7 +235,7 @@ class VCI(torch.nn.Module):
                     + [self.hparams["classifier_width"]]
                         * self.hparams["classifier_depth"]
                     + [num_covariate],
-                    final_act=(None if num_covariate==1 else 'softmax')
+                    final_act=(None if num_covariate==1 else "softmax")
                 )
                 self.covariate_classifier.append(classifier)
                 self.loss_covariate_classifier.append(torch.nn.CrossEntropyLoss())
@@ -252,13 +252,13 @@ class VCI(torch.nn.Module):
 
             return self.treatment_classifier, self.covariate_classifier
 
-        elif self.dist_mode == 'discriminate':
+        elif self.dist_mode == "discriminate":
             params = []
 
             # embeddings
             if self.embed_outcomes:
                 self.adv_outcomes_emb = MLP(
-                    [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act='relu'
+                    [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act="relu"
                 )
                 outcome_dim = self.hparams["outcome_emb_dim"]
                 params.extend(list(self.adv_outcomes_emb.parameters()))
@@ -311,7 +311,7 @@ class VCI(torch.nn.Module):
 
             return self.discriminator
 
-        elif self.dist_mode == 'fit':
+        elif self.dist_mode == "fit":
             self.outcome_estimator = MLP(
                 [treatment_dim+covariate_dim]
                 + [self.hparams["estimator_width"]] * self.hparams["estimator_depth"]
@@ -331,7 +331,7 @@ class VCI(torch.nn.Module):
 
             return self.outcome_estimator
 
-        elif self.dist_mode == 'match':
+        elif self.dist_mode == "match":
             return None
 
         else:
@@ -392,20 +392,20 @@ class VCI(torch.nn.Module):
         if dist is None:
             dist = self.outcome_dist
 
-        if dist == 'nb':
+        if dist == "nb":
             mus = F.softplus(constructions[:, :dim]).add(eps)
             thetas = F.softplus(constructions[:, dim:]).add(eps)
             dist = NegativeBinomial(
                 mu=mus, theta=thetas
             )
-        elif dist == 'zinb':
+        elif dist == "zinb":
             mus = F.softplus(constructions[:, :dim]).add(eps)
             thetas = F.softplus(constructions[:, dim:(2*dim)]).add(eps)
             zi_logits = constructions[:, (2*dim):].add(eps)
             dist = ZeroInflatedNegativeBinomial(
                 mu=mus, theta=thetas, zi_logits=zi_logits
             )
-        elif dist == 'normal':
+        elif dist == "normal":
             locs = constructions[:, :dim]
             scales = F.softplus(constructions[:, dim:]).add(eps)
             dist = Normal(
@@ -446,7 +446,7 @@ class VCI(torch.nn.Module):
         with torch.autograd.no_grad():
             latents_constr = self.encode(outcomes, treatments, covariates)
             latents_dist = self.distributionize(
-                latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+                latents_constr, dim=self.hparams["latent_dim"], dist="normal"
             )
 
             outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
@@ -474,7 +474,7 @@ class VCI(torch.nn.Module):
         with torch.autograd.no_grad():
             latents_constr = self.encode(outcomes, treatments, covariates)
             latents_dist = self.distributionize(
-                latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+                latents_constr, dim=self.hparams["latent_dim"], dist="normal"
             )
 
             outcomes_constr_samp = self.sample(
@@ -518,20 +518,20 @@ class VCI(torch.nn.Module):
         else:
             weights = None
 
-        if dist == 'nb':
+        if dist == "nb":
             logprob = logprob_nb_positive(outcomes,
                 mu=outcomes_param[0],
                 theta=outcomes_param[1],
                 weight=weights
             )
-        elif dist == 'zinb':
+        elif dist == "zinb":
             logprob = logprob_zinb_positive(outcomes,
                 mu=outcomes_param[0],
                 theta=outcomes_param[1],
                 zi_logits=outcomes_param[2],
                 weight=weights
             )
-        elif dist == 'normal':
+        elif dist == "normal":
             logprob = logprob_normal(outcomes,
                 loc=outcomes_param[0],
                 scale=outcomes_param[1],
@@ -553,10 +553,10 @@ class VCI(torch.nn.Module):
         ).mean()
 
         # covariate-specific likelihood
-        if self.dist_mode == 'classify':
+        if self.dist_mode == "classify":
             raise NotImplementedError(
-                "TODO: implement dist_mode 'classify' for distribution loss")
-        if self.dist_mode == 'discriminate':
+                'TODO: implement dist_mode "classify" for distribution loss')
+        if self.dist_mode == "discriminate":
             if self.iteration % self.hparams["adversary_steps"]:
                 self.update_discriminator(
                     outcomes, cf_outcomes_out.detach(), treatments, covariates
@@ -566,10 +566,10 @@ class VCI(torch.nn.Module):
                 self.discriminate(cf_outcomes_out, treatments, covariates),
                 torch.ones(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
             )
-        elif self.dist_mode == 'fit':
+        elif self.dist_mode == "fit":
             raise NotImplementedError(
-                "TODO: implement dist_mode 'fit' for distribution loss")
-        elif self.dist_mode == 'match':
+                'TODO: implement dist_mode "fit" for distribution loss')
+        elif self.dist_mode == "match":
             notNone = [o != None for o in cf_outcomes]
             cf_outcomes = [o for (o, n) in zip(cf_outcomes, notNone) if n]
             cf_outcomes_out = cf_outcomes_out[notNone]
@@ -577,7 +577,7 @@ class VCI(torch.nn.Module):
             kernel_std = [self.hparams["kde_kernel_std"] * torch.ones_like(o) 
                 for o in cf_outcomes]
             covar_spec_nllh = -self.logprob(
-                cf_outcomes_out, (cf_outcomes, kernel_std), dist='normal'
+                cf_outcomes_out, (cf_outcomes, kernel_std), dist="normal"
             )
 
         # kl divergence
@@ -603,7 +603,7 @@ class VCI(torch.nn.Module):
         # q(z | y, x, t)
         latents_constr = self.encode(outcomes, treatments, covariates)
         latents_dist = self.distributionize(
-            latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+            latents_constr, dim=self.hparams["latent_dim"], dist="normal"
         )
 
         # p(y | z, t)
@@ -623,9 +623,9 @@ class VCI(torch.nn.Module):
         # q(z | y', x, t')
         if detach_pattern is None:
             cf_outcomes_in = cf_outcomes_out
-        elif detach_pattern == 'full':
+        elif detach_pattern == "full":
             cf_outcomes_in = cf_outcomes_out.detach()
-        elif detach_pattern == 'half':
+        elif detach_pattern == "half":
             if sample:
                 cf_outcomes_in = self.distributionize(
                     self.decode(latents_dist.sample(), cf_treatments)
@@ -641,7 +641,7 @@ class VCI(torch.nn.Module):
             cf_outcomes_in, cf_treatments, covariates
         )
         cf_latents_dist = self.distributionize(
-            cf_latents_constr, dim=self.hparams["latent_dim"], dist='normal'
+            cf_latents_constr, dim=self.hparams["latent_dim"], dist="normal"
         )
 
         indiv_spec_nllh, covar_spec_nllh, kl_divergence = self.loss(

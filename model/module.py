@@ -38,11 +38,11 @@ class MLP(torch.nn.Module):
             ]
         if final_act is None:
             pass
-        elif final_act == 'relu':
+        elif final_act == "relu":
             layers += [torch.nn.ReLU()]
-        elif final_act == 'sigmoid':
+        elif final_act == "sigmoid":
             layers += [torch.nn.Sigmoid()]
-        elif final_act == 'softmax':
+        elif final_act == "softmax":
             layers += [torch.nn.Softmax(dim=1)]
         else:
             raise ValueError("final_act not recognized")
