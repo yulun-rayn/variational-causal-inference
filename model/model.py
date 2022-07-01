@@ -33,7 +33,6 @@ def load_VCI(args, state_dict=None):
         outcome_dist=args["outcome_dist"],
         dist_mode=args["dist_mode"],
         patience=args["patience"],
-        seed=args["seed"],
         device=device,
         hparams=args["hparams"]
     )
@@ -59,7 +58,6 @@ class VCI(torch.nn.Module):
         dist_mode='match',
         best_score=-1e3,
         patience=5,
-        seed=0,
         device="cuda",
         hparams=""
     ):
@@ -73,7 +71,6 @@ class VCI(torch.nn.Module):
         self.embed_covariates = embed_covariates
         self.outcome_dist = outcome_dist
         self.dist_mode=dist_mode
-        self.seed = seed
         # early-stopping
         self.best_score = best_score
         self.patience = patience
@@ -138,14 +135,15 @@ class VCI(torch.nn.Module):
             "discriminator_wd": 4e-7,
             "estimator_wd": 4e-7,
             "adversary_steps": 3,
-            "batch_size": 64,
             "step_size_lr": 45,
         }
 
         # the user may fix some hparams
         if hparams != "":
             if isinstance(hparams, str):
-                self.hparams.update(json.loads(hparams))
+                with open(hparams) as f:
+                    dictionary = json.load(f)
+                self.hparams.update(dictionary)
             else:
                 self.hparams.update(hparams)
 

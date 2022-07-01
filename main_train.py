@@ -15,10 +15,6 @@ def parse_arguments():
     parser.add_argument('--cpu', action='store_true')
     parser.add_argument('--gpu', default='0')
 
-    # mode argument
-    parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
-    parser.add_argument("--dist_mode", type=str, default="match", help='classify;discriminate;fit;match')
-
     # dataset arguments
     parser.add_argument("--data", type=str, required=True)
     parser.add_argument("--perturbation_key", type=str, default="perturbation")
@@ -28,12 +24,14 @@ def parse_arguments():
     parser.add_argument("--split_key", type=str, default=None)
 
     # model arguments
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--hparams", type=str, default="") # see set_hparams_() in model.model
+    parser.add_argument("--outcome_dist", type=str, default="normal", help='nb;zinb;normal')
+    parser.add_argument("--dist_mode", type=str, default="match", help='classify;discriminate;fit;match')
+    parser.add_argument("--hparams", type=str, default="hparams.json")
 
     # training arguments
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--max_epochs", type=int, default=2000)
-    parser.add_argument("--max_minutes", type=int, default=300)
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--checkpoint_freq", type=int, default=20)
 

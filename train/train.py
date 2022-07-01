@@ -9,7 +9,7 @@ import torch
 
 from evaluate.evaluate import evaluate
 
-from model.model import load_POVI
+from model.model import load_VCI
 
 from dataset.dataset import load_dataset_splits
 
@@ -35,7 +35,7 @@ def prepare(args, state_dict=None):
     args["num_treatments"] = datasets["training"].num_perturbations
     args["num_covariates"] = datasets["training"].num_covariates
 
-    model = load_POVI(args, state_dict)
+    model = load_VCI(args, state_dict)
 
     return model, datasets
 
@@ -43,6 +43,8 @@ def train(args, return_model=False):
     """
     Trains a VCI model
     """
+    if args["seed"] is not None:
+        torch.manual_seed(args["seed"])
 
     model, datasets = prepare(args)
 
@@ -50,7 +52,7 @@ def train(args, return_model=False):
         {
             "loader_tr": torch.utils.data.DataLoader(
                 datasets["training"],
-                batch_size=model.hparams["batch_size"],
+                batch_size=args["batch_size"],
                 shuffle=True,
                 collate_fn=(lambda batch: data_collate(batch, nb_dims=1))
             )
@@ -93,10 +95,7 @@ def train(args, return_model=False):
         # decay learning rate if necessary
         # also check stopping condition: patience ran out OR
         # time ran out OR max epochs achieved
-        stop = (
-            (epoch == args["max_epochs"] - 1) 
-            #or (ellapsed_minutes > args["max_minutes"])
-        )
+        stop = (epoch == args["max_epochs"] - 1)
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:
             evaluation_stats = evaluate(model, datasets)
