@@ -9,7 +9,7 @@ import torch
 
 from evaluate.evaluate import evaluate
 
-from model.model import PotentialOutcomeVI
+from model.model import load_POVI
 
 from dataset.dataset import load_dataset_splits
 
@@ -21,10 +21,6 @@ def prepare(args, state_dict=None):
     Instantiates model and dataset to run an experiment.
     """
 
-    device = torch.device("cpu") if args["cpu"] else torch.device(
-        'cuda:' + str(args["gpu"]) if torch.cuda.is_available() else "cpu"
-    )
-
     datasets = load_dataset_splits(
         args["data"],
         args["perturbation_key"],
@@ -35,22 +31,13 @@ def prepare(args, state_dict=None):
         True if args["dist_mode"] == 'match' else False,
     )
 
-    model = PotentialOutcomeVI(
-        datasets["training"].num_genes,
-        datasets["training"].num_perturbations,
-        datasets["training"].num_covariates,
-        outcome_dist=args["outcome_dist"],
-        dist_mode=args["dist_mode"],
-        patience=args["patience"],
-        seed=args["seed"],
-        device=device,
-        hparams=args["hparams"]
-    )
-    if state_dict is not None:
-        model.load_state_dict(state_dict)
+    args["num_outcomes"] = datasets["training"].num_genes
+    args["num_treatments"] = datasets["training"].num_perturbations
+    args["num_covariates"] = datasets["training"].num_covariates
+
+    model = load_POVI(args, state_dict)
 
     return model, datasets
-
 
 def train(args, return_model=False):
     """

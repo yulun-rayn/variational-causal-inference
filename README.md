@@ -1,12 +1,6 @@
 # Variational Causal Inference
 
-The evidence lower bound:
-$$
-\begin{align}
-    \log \left[ p (Y' | Y, X, T, T') \right] + \log \left[ p (Y | X, T) \right] &\geq \mathbb E_{q (Z | Y, X, T)} \log \left[ p (Y | Z, T) \right] + \log \left[ p (Y' | X, T') \right] \nonumber \\
-    &\quad - \mathrm{KL} \left[ q (Z | Y, X, T) \parallel q (Z | Y', X, T') \right].
-\end{align}
-$$
+![](figure/elbo.png)
 
 
 ## Installation
