@@ -15,8 +15,10 @@ PYARGS="$PYARGS --covariate_keys celltype donor stim"
 PYARGS="$PYARGS --split_key split"
 #PYARGS="$PYARGS --dose_key dose"
 
-PYARGS="$PYARGS --max_epochs 1000"
 PYARGS="$PYARGS --outcome_dist normal"
 PYARGS="$PYARGS --dist_mode match"
 
-python vci/main_train.py $PYARGS
+PYARGS="$PYARGS --max_epochs 1000"
+PYARGS="$PYARGS --batch_size 64"
+
+python main_train.py $PYARGS

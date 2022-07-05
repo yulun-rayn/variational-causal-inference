@@ -30,7 +30,7 @@ def parse_arguments():
 
     # training arguments
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--max_epochs", type=int, default=2000)
     parser.add_argument("--patience", type=int, default=20)
     parser.add_argument("--checkpoint_freq", type=int, default=20)

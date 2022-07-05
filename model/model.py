@@ -148,9 +148,8 @@ class VCI(torch.nn.Module):
                 self.hparams.update(hparams)
 
         return self.hparams
-    
-    def _init_indiv_model(self):
 
+    def _init_indiv_model(self):
         params = []
 
         # embeddings
@@ -234,8 +233,7 @@ class VCI(torch.nn.Module):
                     [self.num_outcomes]
                     + [self.hparams["classifier_width"]]
                         * self.hparams["classifier_depth"]
-                    + [num_covariate],
-                    final_act=(None if num_covariate==1 else "softmax")
+                    + [num_covariate]
                 )
                 self.covariate_classifier.append(classifier)
                 self.loss_covariate_classifier.append(torch.nn.CrossEntropyLoss())
@@ -312,13 +310,43 @@ class VCI(torch.nn.Module):
             return self.discriminator
 
         elif self.dist_mode == "fit":
+            params = []
+
+            # embeddings
+            if self.embed_treatments:
+                self.adv_treatments_emb = torch.nn.Embedding(
+                    self.num_treatments, self.hparams["treatment_emb_dim"]
+                )
+                treatment_dim = self.hparams["treatment_emb_dim"]
+                params.extend(list(self.adv_treatments_emb.parameters()))
+            else:
+                treatment_dim = self.num_treatments
+
+            if self.embed_covariates:
+                self.adv_covariates_emb = []
+                for num_covariate in self.num_covariates:
+                    self.adv_covariates_emb.append(
+                        torch.nn.Embedding(num_covariate, 
+                            self.hparams["covariate_emb_dim"]
+                        )
+                    )
+                self.adv_covariates_emb = torch.nn.Sequential(
+                    *self.adv_covariates_emb
+                )
+                covariate_dim = self.hparams["covariate_emb_dim"]*len(self.num_covariates)
+                for emb in self.adv_covariates_emb:
+                    params.extend(list(emb.parameters()))
+            else:
+                covariate_dim = sum(self.num_covariates)
+
+            # model
             self.outcome_estimator = MLP(
                 [treatment_dim+covariate_dim]
                 + [self.hparams["estimator_width"]] * self.hparams["estimator_depth"]
                 + [self.num_outcomes * self.num_dist_params]
             )
             self.loss_outcome_estimator = torch.nn.MSELoss()
-            params = list(self.outcome_estimator.parameters())
+            params.extend(list(self.outcome_estimator.parameters()))
 
             self.optimizer_estimator = torch.optim.Adam(
                 params,
@@ -352,8 +380,6 @@ class VCI(torch.nn.Module):
         return self.encoder(inputs)
 
     def decode(self, latents, treatments):
-        latents, treatments = self.move_inputs(latents, treatments)
-
         if self.embed_treatments:
             treatments = self.treatments_embeddings(treatments.argmax(1))
 
@@ -432,11 +458,6 @@ class VCI(torch.nn.Module):
         covariates,
         return_dist=False
     ):
-        """
-        Predict "what would have the gene expression `outcomes` been, had the
-        cells in `outcomes` with cell types `cell_types` been treated with
-        combination of treatments `treatments`.
-        """
         outcomes, treatments, cf_treatments, covariates = self.move_inputs(
             outcomes, treatments, cf_treatments, covariates
         )
