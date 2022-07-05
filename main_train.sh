@@ -10,7 +10,7 @@ PYARGS="$PYARGS --name train-epoch-1000"
 PYARGS="$PYARGS --artifact_path $DATA/artifact"
 PYARGS="$PYARGS --gpu 0" #PYARGS="$PYARGS --cpu"
 
-PYARGS="$PYARGS --data $DATA/datasets/marson_prepped.h5ad"
+PYARGS="$PYARGS --data_path $DATA/datasets/marson_prepped.h5ad"
 PYARGS="$PYARGS --covariate_keys celltype donor stim"
 PYARGS="$PYARGS --split_key split"
 #PYARGS="$PYARGS --dose_key dose"

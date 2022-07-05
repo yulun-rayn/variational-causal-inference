@@ -10,7 +10,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 
-from utils.math_utils import (
+from ..utils.math_utils import (
     logprob_nb_positive,
     logprob_zinb_positive,
     convert_counts_logits_to_mean_disp, 

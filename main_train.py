@@ -1,4 +1,4 @@
-from train.train import train
+from vci.train import train
 
 import argparse
 
@@ -16,7 +16,7 @@ def parse_arguments():
     parser.add_argument("--gpu", default="0")
 
     # dataset arguments
-    parser.add_argument("--data", type=str, required=True)
+    parser.add_argument("--data_path", type=str, required=True)
     parser.add_argument("--perturbation_key", type=str, default="perturbation")
     parser.add_argument("--control_key", type=str, default="control")
     parser.add_argument("--dose_key", type=str, default=None)

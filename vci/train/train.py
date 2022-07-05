@@ -7,14 +7,14 @@ import numpy as np
 
 import torch
 
-from evaluate.evaluate import evaluate
+from ..evaluate.evaluate import evaluate
 
-from model.model import load_VCI
+from ..model.model import load_VCI
 
-from dataset.dataset import load_dataset_splits
+from ..dataset.dataset import load_dataset_splits
 
-from utils.general_utils import pjson
-from utils.data_utils import data_collate
+from ..utils.general_utils import pjson
+from ..utils.data_utils import data_collate
 
 def prepare(args, state_dict=None):
     """
@@ -22,7 +22,7 @@ def prepare(args, state_dict=None):
     """
 
     datasets = load_dataset_splits(
-        args["data"],
+        args["data_path"],
         args["perturbation_key"],
         args["control_key"],
         args["dose_key"],
@@ -93,8 +93,8 @@ def train(args, return_model=False):
         model.history["elapsed_time_min"] = ellapsed_minutes
 
         # decay learning rate if necessary
-        # also check stopping condition: patience ran out OR
-        # time ran out OR max epochs achieved
+        # also check stopping condition: 
+        # patience ran out OR max epochs reached
         stop = (epoch == args["max_epochs"] - 1)
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:

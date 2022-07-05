@@ -4,9 +4,9 @@ import torch
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-from model.module import MLP, NegativeBinomial, ZeroInflatedNegativeBinomial
+from .module import MLP, NegativeBinomial, ZeroInflatedNegativeBinomial
 
-from utils.math_utils import (
+from ..utils.math_utils import (
     kldiv_normal,
     logprob_normal,
     logprob_nb_positive,
