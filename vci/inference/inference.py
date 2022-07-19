@@ -1,15 +1,15 @@
 import torch
 
-def estimate(type='ATT', *args, **kwargs):
-    if type=='ATT':
+def estimate(mode='ATT', *args, **kwargs):
+    if mode=='ATT':
         mean_est, std_est = estimate_ATT(*args, **kwargs, return_all=False)
-    elif type=='ATE':
+    elif mode=='ATE':
         mean_est, std_est = estimate_ATE(*args, **kwargs, return_all=False)
     else:
-        raise ValueError("type not recognized")
+        raise ValueError("mode not recognized")
 
     return {
-        "type": type,
+        "mode": mode,
         "mean": mean_est.tolist(),
         "std": std_est.tolist()
     }

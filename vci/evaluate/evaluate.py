@@ -6,7 +6,7 @@ import torch
 
 from ..inference.inference import estimate
 
-def evaluate(model, datasets, type="r2", batch_size=None):
+def evaluate(model, datasets, mode="r2", batch_size=None):
     """
     Measure quality metrics using `evaluate()` on the training, test, and
     out-of-distribution (ood) splits.
@@ -14,7 +14,7 @@ def evaluate(model, datasets, type="r2", batch_size=None):
 
     model.eval()
     with torch.no_grad():
-        if type == "r2":
+        if mode == "r2":
             evaluation_stats = {
                 "training": evaluate_r2(
                     model,
@@ -38,7 +38,7 @@ def evaluate(model, datasets, type="r2", batch_size=None):
                 if datasets["test"].num_perturbations > 0
                 else None,
             }
-        elif type == "ci":
+        elif mode == "ci":
             evaluation_stats = {
                 "training": evaluate_ci(
                     model, datasets["training"], batch_size=batch_size
@@ -51,7 +51,7 @@ def evaluate(model, datasets, type="r2", batch_size=None):
                 )
             }
         else:
-            raise ValueError("type not recognized")
+            raise ValueError("mode not recognized")
     model.train()
     return evaluation_stats
 
@@ -118,7 +118,7 @@ def evaluate_r2(model, dataset, dataset_control, batch_size=None, min_samples=30
         for s in [mean_score, mean_score_de]
     ]
 
-def evaluate_ci(model, dataset, batch_size=None):
+def evaluate_ci(model, dataset, mode="ATT", batch_size=None):
     genes = dataset.genes.clone()
     perts = dataset.perturbations.clone()
     covars = [covar.clone() for covar in dataset.covariates]
@@ -157,7 +157,7 @@ def evaluate_ci(model, dataset, batch_size=None):
         predicts = torch.cat(predicts, 0)
 
         estimates.append(
-            estimate("ATT",
+            estimate(mode,
                 outcomes=genes.numpy(), treatments=names,
                 predicts=predicts.numpy(), propensities=propensities,
                 target_treatment=n
