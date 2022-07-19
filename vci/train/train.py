@@ -13,7 +13,7 @@ from ..model.model import load_VCI
 
 from ..dataset.dataset import load_dataset_splits
 
-from ..utils.general_utils import pjson
+from ..utils.general_utils import pjson, sjson
 from ..utils.data_utils import data_collate
 
 def prepare(args, state_dict=None):
@@ -39,7 +39,7 @@ def prepare(args, state_dict=None):
 
     return model, datasets
 
-def train(args, return_model=False):
+def train(args):
     """
     Trains a VCI model
     """
@@ -98,7 +98,7 @@ def train(args, return_model=False):
         stop = (epoch == args["max_epochs"] - 1)
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:
-            evaluation_stats = evaluate(model, datasets)
+            evaluation_stats = evaluate(model, datasets, "r2")
             for key, val in evaluation_stats.items():
                 if not (key in model.history.keys()):
                     model.history[key] = []
@@ -134,5 +134,15 @@ def train(args, return_model=False):
                 pjson({"early_stop": epoch})
                 break
 
-    if return_model:
-        return model, datasets
+    print("Calculating estimates...")
+    estimates = evaluate(model, datasets, "ci")
+
+    sjson(
+        estimates,
+        os.path.join(
+            save_dir,
+            "estimates_seed={}_epoch={}.json".format(args["seed"], epoch),
+        )
+    )
+
+    return model

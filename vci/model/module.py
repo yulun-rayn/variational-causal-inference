@@ -43,7 +43,7 @@ class MLP(torch.nn.Module):
         elif final_act == "sigmoid":
             layers += [torch.nn.Sigmoid()]
         elif final_act == "softmax":
-            layers += [torch.nn.Softmax(dim=1)]
+            layers += [torch.nn.Softmax(dim=-1)]
         else:
             raise ValueError("final_act not recognized")
 

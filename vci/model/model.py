@@ -19,11 +19,11 @@ from ..utils.math_utils import (
 
 def load_VCI(args, state_dict=None):
     device = (
-        torch.device("cuda:" + str(args["gpu"]))
+        "cuda:" + str(args["gpu"])
             if (not args["cpu"]) 
                 and torch.cuda.is_available() 
             else 
-        torch.device("cpu")
+        "cpu"
     )
 
     model = VCI(
@@ -70,7 +70,7 @@ class VCI(torch.nn.Module):
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
         self.outcome_dist = outcome_dist
-        self.dist_mode=dist_mode
+        self.dist_mode = dist_mode
         # early-stopping
         self.best_score = best_score
         self.patience = patience
@@ -705,14 +705,6 @@ class VCI(torch.nn.Module):
         self.optimizer_discriminator.step()
 
         return loss.item()
-    
-    def estimate(self):
-        # TODO
-        pass
-
-    def estimate_ATE(self):
-        # TODO
-        pass
 
     def early_stopping(self, score):
         """
