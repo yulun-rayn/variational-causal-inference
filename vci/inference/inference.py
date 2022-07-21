@@ -1,4 +1,4 @@
-import torch
+import numpy
 
 def estimate(mode='ATT', *args, **kwargs):
     if mode=='ATT':
