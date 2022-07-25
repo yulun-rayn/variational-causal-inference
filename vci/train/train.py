@@ -44,6 +44,7 @@ def train(args):
     Trains a VCI model
     """
     if args["seed"] is not None:
+        np.random.seed(args["seed"])
         torch.manual_seed(args["seed"])
 
     model, datasets = prepare(args)

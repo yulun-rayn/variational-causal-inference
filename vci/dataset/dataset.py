@@ -7,6 +7,7 @@ import scanpy as sc
 
 import torch
 
+from ..utils.general_utils import unique_ind
 from ..utils.data_utils import check_adata, rank_genes_groups
 
 import warnings
@@ -196,29 +197,6 @@ class Dataset:
         idx = list(set(self.indices[split]) & set(self.indices[condition]))
         return SubDataset(self, idx)
 
-    def __getitem__(self, i):
-        cf_pert_dose_name = self.control_name
-        while self.control_name in cf_pert_dose_name:
-            cf_i = np.random.choice(len(self.pert_dose))
-            cf_pert_dose_name = self.pert_dose[cf_i]
-            
-        cf_genes = None
-        if self.sample_cf:
-            covariate_name = indx(self.cov_names, i)
-            cf_name = covariate_name + f"_{cf_pert_dose_name}"
-
-            if cf_name in self.cov_pert_dose:
-                cf_inds = np.nonzero(self.cov_pert_dose==cf_name)[0]
-                cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
-
-        return (
-                self.genes[i],
-                indx(self.perturbations, i),
-                cf_genes,
-                indx(self.perturbations, cf_i),
-                *[indx(cov, i) for cov in self.covariates]
-        )
-
     def __len__(self):
         return len(self.genes)
 
@@ -262,6 +240,8 @@ class SubDataset:
         self.num_genes = dataset.num_genes
         self.num_perturbations = dataset.num_perturbations
 
+        self.cov_pert_dose_idx = unique_ind(self.cov_pert_dose)
+
     def subset_condition(self, control=True):
         idx = np.where(self.controls == control)[0].tolist()
         return SubDataset(self, idx)
@@ -278,7 +258,7 @@ class SubDataset:
             cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
             if cf_name in self.cov_pert_dose:
-                cf_inds = np.nonzero(self.cov_pert_dose==cf_name)[0]
+                cf_inds = self.cov_pert_dose_idx[cf_name]
                 cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
 
         return (
