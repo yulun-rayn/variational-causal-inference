@@ -4,8 +4,11 @@
 python=3.9
 
 tqdm=4.64.0
+numpy=1.22.3
+pandas=1.4.2
 pyyaml=5.4.1
 scanpy=1.9.1
+ipykernel=6.9.1
 python-wget=3.2
 tensorboard=2.5.0
 scikit-learn=1.0.2
