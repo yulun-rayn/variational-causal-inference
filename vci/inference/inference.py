@@ -1,18 +1,12 @@
 import numpy
 
 def estimate(mode='ATT', *args, **kwargs):
-    if mode=='ATT':
-        mean_est, std_est = estimate_ATT(*args, **kwargs, return_all=False)
-    elif mode=='ATE':
-        mean_est, std_est = estimate_ATE(*args, **kwargs, return_all=False)
+    if mode == 'ATT':
+        return estimate_ATT(*args, **kwargs, return_all=False)
+    elif mode == 'ATE':
+        return estimate_ATE(*args, **kwargs, return_all=False)
     else:
         raise ValueError("mode not recognized")
-
-    return {
-        "mode": mode,
-        "mean": mean_est.tolist(),
-        "std": std_est.tolist()
-    }
 
 def estimate_ATE(outcomes, treatments, predicts, propensities,
                  treatment, control, return_all=False):

@@ -7,7 +7,7 @@ import numpy as np
 
 import torch
 
-from ..evaluate.evaluate import evaluate
+from ..evaluate.evaluate import evaluate, evaluate_classic
 
 from ..model.model import load_VCI
 
@@ -99,7 +99,17 @@ def train(args):
         stop = (epoch == args["max_epochs"] - 1)
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:
-            evaluation_stats = evaluate(model, datasets, "r2")
+            if args["eval_mode"] == "native":
+                evaluation_stats = evaluate(
+                    model, datasets,
+                    test_all=args["test_all"],
+                    pred_mode=args["pred_mode"]
+                )
+            elif args["eval_mode"] == "classic":
+                evaluation_stats = evaluate_classic(model, datasets)
+            else:
+                raise ValueError("eval_mode not recognized")
+
             for key, val in evaluation_stats.items():
                 if not (key in model.history.keys()):
                     model.history[key] = []
@@ -134,16 +144,5 @@ def train(args):
             if stop:
                 pjson({"early_stop": epoch})
                 break
-
-    print("Calculating estimates...")
-    estimates = evaluate(model, datasets, "ci")
-
-    sjson(
-        estimates,
-        os.path.join(
-            save_dir,
-            "estimates_seed={}_epoch={}.json".format(args["seed"], epoch),
-        )
-    )
 
     return model

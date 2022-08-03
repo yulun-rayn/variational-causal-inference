@@ -243,8 +243,11 @@ class SubDataset:
         self.cov_pert_dose_idx = unique_ind(self.cov_pert_dose)
 
     def subset_condition(self, control=True):
-        idx = np.where(self.controls == control)[0].tolist()
-        return SubDataset(self, idx)
+        if control is None:
+            return self
+        else:
+            idx = np.where(self.controls == control)[0].tolist()
+            return SubDataset(self, idx)
 
     def __getitem__(self, i):
         cf_pert_dose_name = self.control_name
