@@ -143,19 +143,19 @@ def evaluate_classic(model, datasets, batch_size=None):
     model.eval()
     with torch.no_grad():
         evaluation_stats = {
-            "training": evaluate_r2(
+            "training": evaluate_r2_classic(
                 model,
                 datasets["training"].subset_condition(control=False),
                 datasets["training"].subset_condition(control=True),
                 batch_size=batch_size
             ),
-            "test": evaluate_r2(
+            "test": evaluate_r2_classic(
                 model,
                 datasets["test"].subset_condition(control=False),
                 datasets["test"].subset_condition(control=True),
                 batch_size=batch_size
             ),
-            "ood": evaluate_r2(
+            "ood": evaluate_r2_classic(
                 model,
                 datasets["ood"],
                 datasets["test"].subset_condition(control=True),

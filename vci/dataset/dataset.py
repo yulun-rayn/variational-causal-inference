@@ -22,8 +22,8 @@ class Dataset:
     def __init__(
         self,
         data,
-        perturbation_key,
-        control_key,
+        perturbation_key="perturbation",
+        control_key="control",
         dose_key=None,
         covariate_keys=None,
         split_key=None,
@@ -34,15 +34,34 @@ class Dataset:
     ):
         if type(data) == str:
             data = sc.read(data)
-        # Assert perturbation and control keys are present in the adata object
-        assert perturbation_key in data.obs.columns, f"Perturbation {perturbation_key} is missing in the provided adata"
-        assert control_key in data.obs.columns, f"Perturbation {control_key} is missing in the provided adata"
 
         self.sample_cf = sample_cf
         self.cf_samples = cf_samples
 
-        # If no covariates, create dummy covariate
-        if covariate_keys is None or len(covariate_keys)==0:
+        # Fields
+        # perturbation
+        if "perturbation" in data.uns["fields"].keys():
+            perturbation_key = data.uns["fields"]["perturbation"]
+        else:
+            assert perturbation_key in data.obs.columns, f"Perturbation {perturbation_key} is missing in the provided adata"
+        # control
+        if "control" in data.uns["fields"].keys():
+            control_key = data.uns["fields"]["control"]
+        else:
+            assert control_key in data.obs.columns, f"Control {control_key} is missing in the provided adata"
+        # dose
+        if "dose" in data.uns["fields"].keys():
+            dose_key = data.uns["fields"]["dose"]
+        elif dose_key is None:
+            print("Adding a dummy dose...")
+            data.obs["dummy_dose"] = 1.0
+            dose_key = "dummy_dose"
+        else:
+            assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
+        # covariates
+        if "covariates" in data.uns["fields"].keys():
+            covariate_keys = list(data.uns["fields"]["covariates"])
+        elif covariate_keys is None or len(covariate_keys)==0:
             print("Adding a dummy covariate...")
             data.obs["dummy_covar"] = "dummy_covar"
             covariate_keys = ["dummy_covar"]
@@ -51,15 +70,10 @@ class Dataset:
                 covariate_keys = [covariate_keys]
             for key in covariate_keys:
                 assert key in data.obs.columns, f"Covariate {key} is missing in the provided adata"
-        # If no dose, create dummy dose
-        if dose_key is None:
-            print("Adding a dummy dose...")
-            data.obs["dummy_dose"] = 1.0
-            dose_key = "dummy_dose"
-        else:
-            assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
-        # If no split, create split
-        if split_key is None:
+        # split
+        if "split" in data.uns["fields"].keys():
+            split_key = data.uns["fields"]["split"]
+        elif split_key is None:
             print(f"Performing automatic train-test split with {test_ratio} ratio.")
             from sklearn.model_selection import train_test_split
 
@@ -277,12 +291,12 @@ class SubDataset:
 
 def load_dataset_splits(
     data_path: str,
-    perturbation_key: str,
-    control_key: str,
-    dose_key: Union[str, None],
-    covariate_keys: Union[list, str, None],
-    split_key: Union[str, None],
-    sample_cf: bool,
+    perturbation_key: str = "perturbation",
+    control_key: str = "control",
+    dose_key: str = None,
+    covariate_keys: Union[list, str] = None,
+    split_key: str = None,
+    sample_cf: bool = False,
     return_dataset: bool = False,
 ):
 

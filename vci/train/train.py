@@ -23,12 +23,7 @@ def prepare(args, state_dict=None):
 
     datasets = load_dataset_splits(
         args["data_path"],
-        args["perturbation_key"],
-        args["control_key"],
-        args["dose_key"],
-        args["covariate_keys"],
-        args["split_key"],
-        True if args["dist_mode"] == "match" else False,
+        sample_cf=(True if args["dist_mode"] == "match" else False),
     )
 
     args["num_outcomes"] = datasets["training"].num_genes
