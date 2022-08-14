@@ -40,17 +40,17 @@ class Dataset:
 
         # Fields
         # perturbation
-        if "perturbation" in data.uns["fields"].keys():
+        if "perturbation" in data.uns["fields"]:
             perturbation_key = data.uns["fields"]["perturbation"]
         else:
             assert perturbation_key in data.obs.columns, f"Perturbation {perturbation_key} is missing in the provided adata"
         # control
-        if "control" in data.uns["fields"].keys():
+        if "control" in data.uns["fields"]:
             control_key = data.uns["fields"]["control"]
         else:
             assert control_key in data.obs.columns, f"Control {control_key} is missing in the provided adata"
         # dose
-        if "dose" in data.uns["fields"].keys():
+        if "dose" in data.uns["fields"]:
             dose_key = data.uns["fields"]["dose"]
         elif dose_key is None:
             print("Adding a dummy dose...")
@@ -59,7 +59,7 @@ class Dataset:
         else:
             assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
         # covariates
-        if "covariates" in data.uns["fields"].keys():
+        if "covariates" in data.uns["fields"]:
             covariate_keys = list(data.uns["fields"]["covariates"])
         elif covariate_keys is None or len(covariate_keys)==0:
             print("Adding a dummy covariate...")
@@ -71,7 +71,7 @@ class Dataset:
             for key in covariate_keys:
                 assert key in data.obs.columns, f"Covariate {key} is missing in the provided adata"
         # split
-        if "split" in data.uns["fields"].keys():
+        if "split" in data.uns["fields"]:
             split_key = data.uns["fields"]["split"]
         elif split_key is None:
             print(f"Performing automatic train-test split with {test_ratio} ratio.")
@@ -128,7 +128,7 @@ class Dataset:
         self.perts_dict = dict(
             zip(pert_unique, pert_unique_onehot)
         )
-        if self.control_name not in self.perts_dict.keys():
+        if self.control_name not in self.perts_dict:
             self.perts_dict[self.control_name] = torch.zeros(len(pert_unique))
 
         # get perturbation combinations
@@ -274,7 +274,7 @@ class SubDataset:
             covariate_name = indx(self.cov_names, i)
             cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
-            if cf_name in self.cov_pert_dose_idx.keys():
+            if cf_name in self.cov_pert_dose_idx:
                 cf_inds = self.cov_pert_dose_idx[cf_name]
                 cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
 
