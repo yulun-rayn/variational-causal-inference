@@ -265,7 +265,7 @@ class SubDataset:
 
     def __getitem__(self, i):
         cf_pert_dose_name = self.control_name
-        while self.control_name in cf_pert_dose_name:
+        while self.control_name == cf_pert_dose_name:
             cf_i = np.random.choice(len(self.pert_dose))
             cf_pert_dose_name = self.pert_dose[cf_i]
 
@@ -274,16 +274,16 @@ class SubDataset:
             covariate_name = indx(self.cov_names, i)
             cf_name = covariate_name + f"_{cf_pert_dose_name}"
 
-            if cf_name in self.cov_pert_dose:
+            if cf_name in self.cov_pert_dose_idx.keys():
                 cf_inds = self.cov_pert_dose_idx[cf_name]
                 cf_genes = self.genes[np.random.choice(cf_inds, min(len(cf_inds), self.cf_samples))]
 
         return (
-                self.genes[i],
-                indx(self.perturbations, i),
-                cf_genes,
-                indx(self.perturbations, cf_i),
-                *[indx(cov, i) for cov in self.covariates]
+            self.genes[i],
+            indx(self.perturbations, i),
+            cf_genes,
+            indx(self.perturbations, cf_i),
+            *[indx(cov, i) for cov in self.covariates]
         )
 
     def __len__(self):
