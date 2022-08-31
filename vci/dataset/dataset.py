@@ -263,7 +263,7 @@ class SubDataset:
 
     def __getitem__(self, i):
         cf_pert_dose_name = self.control_names[0]
-        while cf_pert_dose_name in self.control_names:
+        while any(c in cf_pert_dose_name for c in self.control_names):
             cf_i = np.random.choice(len(self.pert_dose))
             cf_pert_dose_name = self.pert_dose[cf_i]
 
