@@ -319,28 +319,3 @@ def ranks_to_df(data, key="rank_genes_groups"):
         dfs.append(series)
 
     return pd.concat(dfs, axis=1)
-
-
-def check_adata(adata, special_fields, special_chars=["_"], replacements=["-"]):
-    replaced = False
-    for sf in special_fields:
-        if sf is None:
-            continue
-        chars, replaces = [], []
-        for i, el in enumerate(adata.obs[sf].values):
-            for char, replace in zip(special_chars, replacements):
-                if char in str(el):
-                    adata.obs[sf][i] = [s.replace(char, replace) for s in adata.obs[sf].values]
-
-                    if char not in chars:
-                        chars.append(char)
-                        replaces.append(replace)
-                    replaced = True
-        if len(chars) > 0:
-            print(
-                f"WARNING. Special characters {chars} were found in: '{sf}'.",
-                f"They will be replaced with {replaces}.",
-                "Be careful, it may lead to errors downstream.",
-            )
-
-    return adata, replaced

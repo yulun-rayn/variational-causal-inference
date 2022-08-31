@@ -8,7 +8,7 @@ import scanpy as sc
 import torch
 
 from ..utils.general_utils import unique_ind
-from ..utils.data_utils import check_adata, rank_genes_groups
+from ..utils.data_utils import rank_genes_groups
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -24,9 +24,9 @@ class Dataset:
         data,
         perturbation_key="perturbation",
         control_key="control",
-        dose_key=None,
-        covariate_keys=None,
-        split_key=None,
+        dose_key="dose",
+        covariate_keys="covariates",
+        split_key="split",
         test_ratio=0.2,
         random_state=42,
         sample_cf=False,
@@ -40,18 +40,18 @@ class Dataset:
 
         # Fields
         # perturbation
-        if "perturbation" in data.uns["fields"]:
-            perturbation_key = data.uns["fields"]["perturbation"]
+        if perturbation_key in data.uns["fields"]:
+            perturbation_key = data.uns["fields"][perturbation_key]
         else:
             assert perturbation_key in data.obs.columns, f"Perturbation {perturbation_key} is missing in the provided adata"
         # control
-        if "control" in data.uns["fields"]:
-            control_key = data.uns["fields"]["control"]
+        if control_key in data.uns["fields"]:
+            control_key = data.uns["fields"][control_key]
         else:
             assert control_key in data.obs.columns, f"Control {control_key} is missing in the provided adata"
         # dose
-        if "dose" in data.uns["fields"]:
-            dose_key = data.uns["fields"]["dose"]
+        if dose_key in data.uns["fields"]:
+            dose_key = data.uns["fields"][dose_key]
         elif dose_key is None:
             print("Adding a dummy dose...")
             data.obs["dummy_dose"] = 1.0
@@ -59,11 +59,11 @@ class Dataset:
         else:
             assert dose_key in data.obs.columns, f"Dose {dose_key} is missing in the provided adata"
         # covariates
-        if "covariates" in data.uns["fields"]:
-            covariate_keys = list(data.uns["fields"]["covariates"])
+        if isinstance(covariate_keys, str) and covariate_keys in data.uns["fields"]:
+            covariate_keys = list(data.uns["fields"][covariate_keys])
         elif covariate_keys is None or len(covariate_keys)==0:
             print("Adding a dummy covariate...")
-            data.obs["dummy_covar"] = "dummy_covar"
+            data.obs["dummy_covar"] = "dummy-covar"
             covariate_keys = ["dummy_covar"]
         else:
             if not isinstance(covariate_keys, list):
@@ -71,8 +71,8 @@ class Dataset:
             for key in covariate_keys:
                 assert key in data.obs.columns, f"Covariate {key} is missing in the provided adata"
         # split
-        if "split" in data.uns["fields"]:
-            split_key = data.uns["fields"]["split"]
+        if split_key in data.uns["fields"]:
+            split_key = data.uns["fields"][split_key]
         elif split_key is None:
             print(f"Performing automatic train-test split with {test_ratio} ratio.")
             from sklearn.model_selection import train_test_split
@@ -111,10 +111,6 @@ class Dataset:
             self.genes = torch.Tensor(data.X) # data.layers["counts"]
 
         self.var_names = data.var_names
-
-        data, replaced = check_adata(
-            data, [perturbation_key, dose_key] + covariate_keys
-        )
 
         self.pert_names = np.array(data.obs[perturbation_key].values)
         self.doses = np.array(data.obs[dose_key].values)
@@ -189,10 +185,10 @@ class Dataset:
             for i in range(len(data))
         ])
 
-        if not ("rank_genes_groups_cov" in data.uns) or replaced:
+        if not ("rank_genes_groups_cov" in data.uns):
             data.obs["cov_name"] = self.cov_names
             data.obs["cov_pert_name"] = self.cov_pert
-            print("Ranking genes for DE genes.")
+            print("Ranking genes for DE genes...")
             rank_genes_groups(data,
                 groupby="cov_pert_name", 
                 reference="cov_name",
@@ -291,9 +287,9 @@ def load_dataset_splits(
     data_path: str,
     perturbation_key: str = "perturbation",
     control_key: str = "control",
-    dose_key: str = None,
-    covariate_keys: Union[list, str] = None,
-    split_key: str = None,
+    dose_key: str = "dose",
+    covariate_keys: Union[list, str] = "covariates",
+    split_key: str = "split",
     sample_cf: bool = False,
     return_dataset: bool = False,
 ):
