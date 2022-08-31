@@ -101,9 +101,9 @@ class Dataset:
         self.dose_key = dose_key
         self.covariate_keys = covariate_keys
 
-        self.control_name = np.unique(
+        self.control_names = np.unique(
             data[data.obs[self.control_key] == 1].obs[self.perturbation_key]
-        )[0]
+        )
 
         if scipy.sparse.issparse(data.X):
             self.genes = torch.Tensor(data.X.A)
@@ -128,8 +128,6 @@ class Dataset:
         self.perts_dict = dict(
             zip(pert_unique, pert_unique_onehot)
         )
-        if self.control_name not in self.perts_dict:
-            self.perts_dict[self.control_name] = torch.zeros(len(pert_unique))
 
         # get perturbation combinations
         perturbations = []
@@ -229,7 +227,7 @@ class SubDataset:
         self.dose_key = dataset.dose_key
         self.covariate_keys = dataset.covariate_keys
 
-        self.control_name = indx(dataset.control_name, 0)
+        self.control_names = dataset.control_names
 
         self.perts_dict = dataset.perts_dict
         self.covars_dict = dataset.covars_dict
@@ -264,8 +262,8 @@ class SubDataset:
             return SubDataset(self, idx)
 
     def __getitem__(self, i):
-        cf_pert_dose_name = self.control_name
-        while self.control_name == cf_pert_dose_name:
+        cf_pert_dose_name = self.control_names[0]
+        while cf_pert_dose_name in self.control_names:
             cf_i = np.random.choice(len(self.pert_dose))
             cf_pert_dose_name = self.pert_dose[cf_i]
 

@@ -112,15 +112,15 @@ class VCI(torch.nn.Module):
             "treatment_emb_dim": 64,
             "covariate_emb_dim": 16,
             "encoder_width": 128,
-            "encoder_depth": 2,
+            "encoder_depth": 3,
             "decoder_width": 128,
-            "decoder_depth": 2,
+            "decoder_depth": 3,
             "classifier_width": 64,
-            "classifier_depth": 2,
+            "classifier_depth": 3,
             "discriminator_width": 64,
-            "discriminator_depth": 2,
+            "discriminator_depth": 3,
             "estimator_width": 64,
-            "estimator_depth": 2,
+            "estimator_depth": 3,
             "indiv-spec_lh_weight": 1.0,
             "covar-spec_lh_weight": 1.7,
             "kl_divergence_weight": 0.1,
@@ -191,7 +191,7 @@ class VCI(torch.nn.Module):
         # models
         self.encoder = MLP(
             [outcome_dim+treatment_dim+covariate_dim]
-            + [self.hparams["encoder_width"]] * self.hparams["encoder_depth"]
+            + [self.hparams["encoder_width"]] * (self.hparams["encoder_depth"] - 1)
             + [self.hparams["latent_dim"] * 2],
             final_act="relu"
         )
@@ -199,7 +199,7 @@ class VCI(torch.nn.Module):
 
         self.decoder = MLP(
             [self.hparams["latent_dim"]+treatment_dim]
-            + [self.hparams["decoder_width"]] * self.hparams["decoder_depth"]
+            + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
             + [self.num_outcomes * self.num_dist_params]
         )
         params.extend(list(self.decoder.parameters()))
@@ -220,7 +220,7 @@ class VCI(torch.nn.Module):
         if self.dist_mode == "classify":
             self.treatment_classifier = MLP(
                 [self.num_outcomes]
-                + [self.hparams["classifier_width"]] * self.hparams["classifier_depth"]
+                + [self.hparams["classifier_width"]] * (self.hparams["classifier_depth"] - 1)
                 + [self.num_treatments]
             )
             self.loss_treatment_classifier = torch.nn.CrossEntropyLoss()
@@ -232,7 +232,7 @@ class VCI(torch.nn.Module):
                 classifier = MLP(
                     [self.num_outcomes]
                     + [self.hparams["classifier_width"]]
-                        * self.hparams["classifier_depth"]
+                        * (self.hparams["classifier_depth"] - 1)
                     + [num_covariate]
                 )
                 self.covariate_classifier.append(classifier)
@@ -292,7 +292,7 @@ class VCI(torch.nn.Module):
             # model
             self.discriminator = MLP(
                 [outcome_dim+treatment_dim+covariate_dim]
-                + [self.hparams["discriminator_width"]] * self.hparams["discriminator_depth"]
+                + [self.hparams["discriminator_width"]] * (self.hparams["discriminator_depth"] - 1)
                 + [1]
             )
             self.loss_discriminator = torch.nn.BCEWithLogitsLoss()
@@ -342,7 +342,7 @@ class VCI(torch.nn.Module):
             # model
             self.outcome_estimator = MLP(
                 [treatment_dim+covariate_dim]
-                + [self.hparams["estimator_width"]] * self.hparams["estimator_depth"]
+                + [self.hparams["estimator_width"]] * (self.hparams["estimator_depth"] - 1)
                 + [self.num_outcomes * self.num_dist_params]
             )
             self.loss_outcome_estimator = torch.nn.MSELoss()

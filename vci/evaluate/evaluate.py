@@ -4,19 +4,14 @@ from sklearn.metrics import r2_score
 
 import torch
 
-from ..inference.inference import estimate
-
 from ..utils.general_utils import unique_ind
 
-def evaluate(model, datasets, test_all=False,
-             pred_mode="mean", batch_size=None):
+def evaluate(model, datasets, test_all=False, batch_size=None):
     """
     Measure quality metrics using `evaluate()` on the training, test, and
     out-of-distribution (ood) splits.
     """
     control = None if test_all else True
-    if control:
-        pred_mode = "mean"
 
     model.eval()
     with torch.no_grad():
@@ -25,19 +20,19 @@ def evaluate(model, datasets, test_all=False,
                 model,
                 datasets["training"].subset_condition(control=False),
                 datasets["training"].subset_condition(control=control),
-                pred_mode=pred_mode, batch_size=batch_size
+                batch_size=batch_size
             ),
             "test": evaluate_r2(
                 model,
                 datasets["test"].subset_condition(control=False),
-                datasets["test"].subset_condition(control=control),
-                pred_mode=pred_mode, batch_size=batch_size
+                datasets["training"].subset_condition(control=control),
+                batch_size=batch_size
             ),
             "ood": evaluate_r2(
                 model,
                 datasets["ood"],
                 datasets["test"].subset_condition(control=control),
-                pred_mode="mean", batch_size=batch_size
+                batch_size=batch_size
             ),
             "optimal for perturbations": 1 / datasets["test"].num_perturbations
             if datasets["test"].num_perturbations > 0
@@ -47,7 +42,7 @@ def evaluate(model, datasets, test_all=False,
     return evaluation_stats
 
 def evaluate_r2(model, dataset, dataset_control,
-                pred_mode="mean", batch_size=None, min_samples=30):
+                batch_size=None, min_samples=30):
     """
     Measures different quality metrics about an `model`, when
     tasked to translate some `genes_control` into each of the perturbation/covariates
@@ -58,8 +53,8 @@ def evaluate_r2(model, dataset, dataset_control,
     (_de) genes.
     """
 
-    mean_score, mean_score_de = [], []
-    #var_score, var_score_de = [], []
+    mean_score_mean, mean_score_robust = [], []
+    mean_score_de_mean, mean_score_de_robust = [], []
 
     cov_cats = unique_ind(dataset.cov_names)
     cov_cats_control = unique_ind(dataset_control.cov_names)
@@ -69,16 +64,9 @@ def evaluate_r2(model, dataset, dataset_control,
         genes_control = dataset_control.genes[idx_control]
         perts_control = dataset_control.perturbations[idx_control]
         covars_control = [covar[idx_control] for covar in dataset_control.covariates]
-        if pred_mode == "robust":
-            pert_names_control = dataset_control.pert_names[idx_control]
-            pert_names_control_cats = unique_ind(pert_names_control)
-            propensities_dict = dict(zip(
-                pert_names_control_cats.keys(),
-                [1./len(v) for v in pert_names_control_cats.values()]
-            ))
-            propensities = np.array(
-                [propensities_dict[n] for n in pert_names_control]
-            )
+
+        pert_names_control = dataset_control.pert_names[idx_control]
+        pert_names_control_cats = unique_ind(pert_names_control)
 
         num = genes_control.size(0)
         if batch_size is None:
@@ -107,28 +95,28 @@ def evaluate_r2(model, dataset, dataset_control,
                     yp.append(out.detach().cpu())
 
                     num_eval += batch_size
-                yp = torch.cat(yp, 0).numpy()
-                if pred_mode == "mean":
-                    yp_m = yp.mean(axis=0)
-                elif pred_mode == "robust":
-                    yp_m, _ = estimate("ATT",
-                        outcomes=genes_control.numpy(), treatments=pert_names_control,
-                        predicts=yp, propensities=propensities,
-                        target_treatment=pert_category
-                    )
-                else:
-                    raise ValueError("pred_mode not recognized")
+                yp = torch.cat(yp, 0)
 
                 # true means
-                yt = dataset.genes[idx, :].numpy()
-                yt_m = yt.mean(axis=0)
+                yt = dataset.genes[idx, :]
+                yt_m = yt.mean(0)
 
-                mean_score.append(r2_score(yt_m, yp_m))
-                mean_score_de.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
+                yp_m = yp.mean(0)
+                mean_score_mean.append(r2_score(yt_m, yp_m))
+                mean_score_de_mean.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
+                if pert_category in pert_names_control_cats:
+                    pert_idx = pert_names_control_cats[pert_category]
+
+                    yp_r = yp_m + (genes_control[pert_idx] - yp[pert_idx]).mean(0)
+                    mean_score_robust.append(r2_score(yt_m, yp_r))
+                    mean_score_de_robust.append(r2_score(yt_m[de_idx], yp_r[de_idx]))
 
     return [
         np.mean(s) if len(s) else -1
-        for s in [mean_score, mean_score_de]
+        for s in [
+            mean_score_mean, mean_score_robust,
+            mean_score_de_mean, mean_score_de_robust
+        ]
     ]
 
 #####################################################

@@ -30,7 +30,6 @@ def parse_arguments():
 
     # evaluation arguments
     parser.add_argument("--eval_mode", type=str, default="native", help="classic;native")
-    parser.add_argument("--pred_mode", type=str, default="mean", help="mean;robust")
     parser.add_argument("--test_all", action="store_true")
 
     return dict(vars(parser.parse_args()))

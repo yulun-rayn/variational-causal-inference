@@ -97,8 +97,7 @@ def train(args):
             if args["eval_mode"] == "native":
                 evaluation_stats = evaluate(
                     model, datasets,
-                    test_all=args["test_all"],
-                    pred_mode=args["pred_mode"]
+                    test_all=args["test_all"]
                 )
             elif args["eval_mode"] == "classic":
                 evaluation_stats = evaluate_classic(model, datasets)
