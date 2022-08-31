@@ -18,7 +18,7 @@ def parse_arguments():
 
     # model arguments
     parser.add_argument("--outcome_dist", type=str, default="normal", help="nb;zinb;normal")
-    parser.add_argument("--dist_mode", type=str, default="match", help="classify;discriminate;fit;match")
+    parser.add_argument("--dist_mode", type=str, default="match", help="discriminate;fit;match")
     parser.add_argument("--hparams", type=str, default="hparams.json")
 
     # training arguments

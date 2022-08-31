@@ -115,12 +115,10 @@ class VCI(torch.nn.Module):
             "encoder_depth": 3,
             "decoder_width": 128,
             "decoder_depth": 3,
-            "classifier_width": 64,
-            "classifier_depth": 3,
             "discriminator_width": 64,
-            "discriminator_depth": 3,
+            "discriminator_depth": 2,
             "estimator_width": 64,
-            "estimator_depth": 3,
+            "estimator_depth": 2,
             "indiv-spec_lh_weight": 1.0,
             "covar-spec_lh_weight": 1.7,
             "kl_divergence_weight": 0.1,
@@ -217,40 +215,7 @@ class VCI(torch.nn.Module):
 
     def _init_covar_model(self):
 
-        if self.dist_mode == "classify":
-            self.treatment_classifier = MLP(
-                [self.num_outcomes]
-                + [self.hparams["classifier_width"]] * (self.hparams["classifier_depth"] - 1)
-                + [self.num_treatments]
-            )
-            self.loss_treatment_classifier = torch.nn.CrossEntropyLoss()
-            params = list(self.treatment_classifier.parameters())
-
-            self.covariate_classifier = []
-            self.loss_covariate_classifier = []
-            for num_covariate in self.num_covariates:
-                classifier = MLP(
-                    [self.num_outcomes]
-                    + [self.hparams["classifier_width"]]
-                        * (self.hparams["classifier_depth"] - 1)
-                    + [num_covariate]
-                )
-                self.covariate_classifier.append(classifier)
-                self.loss_covariate_classifier.append(torch.nn.CrossEntropyLoss())
-                params.extend(list(classifier.parameters()))
-
-            self.optimizer_classifier = torch.optim.Adam(
-                params,
-                lr=self.hparams["classifier_lr"],
-                weight_decay=self.hparams["classifier_wd"],
-            )
-            self.scheduler_classifier = torch.optim.lr_scheduler.StepLR(
-                self.optimizer_classifier, step_size=self.hparams["step_size_lr"]
-            )
-
-            return self.treatment_classifier, self.covariate_classifier
-
-        elif self.dist_mode == "discriminate":
+        if self.dist_mode == "discriminate":
             params = []
 
             # embeddings
@@ -574,9 +539,6 @@ class VCI(torch.nn.Module):
         ).mean()
 
         # covariate-specific likelihood
-        if self.dist_mode == "classify":
-            raise NotImplementedError(
-                'TODO: implement dist_mode "classify" for distribution loss')
         if self.dist_mode == "discriminate":
             if self.iteration % self.hparams["adversary_steps"]:
                 self.update_discriminator(
