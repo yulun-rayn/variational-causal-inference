@@ -95,10 +95,7 @@ def train(args):
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:
             if args["eval_mode"] == "native":
-                evaluation_stats = evaluate(
-                    model, datasets,
-                    test_all=args["test_all"]
-                )
+                evaluation_stats = evaluate(model, datasets)
             elif args["eval_mode"] == "classic":
                 evaluation_stats = evaluate_classic(model, datasets)
             else:

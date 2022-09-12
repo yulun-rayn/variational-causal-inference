@@ -6,12 +6,11 @@ import torch
 
 from ..utils.general_utils import unique_ind
 
-def evaluate(model, datasets, test_all=False, batch_size=None):
+def evaluate(model, datasets, batch_size=None):
     """
     Measure quality metrics using `evaluate()` on the training, test, and
     out-of-distribution (ood) splits.
     """
-    control = None if test_all else True
 
     model.eval()
     with torch.no_grad():
@@ -19,19 +18,19 @@ def evaluate(model, datasets, test_all=False, batch_size=None):
             "training": evaluate_r2(
                 model,
                 datasets["training"].subset_condition(control=False),
-                datasets["training"].subset_condition(control=control),
+                datasets["training"].subset_condition(control=None),
                 batch_size=batch_size
             ),
             "test": evaluate_r2(
                 model,
                 datasets["test"].subset_condition(control=False),
-                datasets["training"].subset_condition(control=control),
+                datasets["training"].subset_condition(control=None),
                 batch_size=batch_size
             ),
             "ood": evaluate_r2(
                 model,
                 datasets["ood"],
-                datasets["test"].subset_condition(control=control),
+                datasets["test"].subset_condition(control=None),
                 batch_size=batch_size
             ),
             "optimal for perturbations": 1 / datasets["test"].num_perturbations
