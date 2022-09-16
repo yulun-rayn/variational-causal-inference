@@ -17,6 +17,9 @@ def parse_arguments():
     parser.add_argument("--gpu", default="0")
 
     # model arguments
+    parser.add_argument("--omega1", type=float, default=1.0, help="weight for individual-specific log-likelihood")
+    parser.add_argument("--omega2", type=float, default=1.7, help="weight for covariate-specific log-likelihood")
+    parser.add_argument("--omega3", type=float, default=0.1, help="weight for negative Kullback–Leibler divergence")
     parser.add_argument("--outcome_dist", type=str, default="normal", help="nb;zinb;normal")
     parser.add_argument("--dist_mode", type=str, default="match", help="discriminate;fit;match")
     parser.add_argument("--hparams", type=str, default="hparams.json")

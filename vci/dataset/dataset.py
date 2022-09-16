@@ -248,7 +248,8 @@ class SubDataset:
         self.num_genes = dataset.num_genes
         self.num_perturbations = dataset.num_perturbations
 
-        self.cov_pert_dose_idx = unique_ind(self.cov_pert_dose)
+        if self.sample_cf:
+            self.cov_pert_dose_idx = unique_ind(self.cov_pert_dose)
 
     def subset_condition(self, control=True):
         if control is None:
