@@ -30,9 +30,9 @@ def load_VCI(args, state_dict=None):
         args["num_outcomes"],
         args["num_treatments"],
         args["num_covariates"],
+        omega0=args["omega0"],
         omega1=args["omega1"],
         omega2=args["omega2"],
-        omega3=args["omega3"],
         outcome_dist=args["outcome_dist"],
         dist_mode=args["dist_mode"],
         patience=args["patience"],
@@ -57,9 +57,9 @@ class VCI(torch.nn.Module):
         embed_outcomes=True,
         embed_treatments=False,
         embed_covariates=True,
-        omega1=1.0,
-        omega2=2.0,
-        omega3=0.1,
+        omega0=1.0,
+        omega1=2.0,
+        omega2=0.1,
         mc_sample_size=30,
         outcome_dist="normal",
         dist_mode="match",
@@ -76,9 +76,9 @@ class VCI(torch.nn.Module):
         self.embed_outcomes = embed_outcomes
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
+        self.omega0 = omega0
         self.omega1 = omega1
         self.omega2 = omega2
-        self.omega3 = omega3
         self.mc_sample_size = mc_sample_size
         self.outcome_dist = outcome_dist
         self.dist_mode = dist_mode
@@ -639,9 +639,9 @@ class VCI(torch.nn.Module):
             treatments, covariates
         )
 
-        loss = (self.omega1 * indiv_spec_nllh
-            + self.omega2 * covar_spec_nllh
-            + self.omega3 * kl_divergence
+        loss = (self.omega0 * indiv_spec_nllh
+            + self.omega1 * covar_spec_nllh
+            + self.omega2 * kl_divergence
         )
 
         self.optimizer_autoencoder.zero_grad()
