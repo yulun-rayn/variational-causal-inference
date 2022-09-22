@@ -30,6 +30,9 @@ def load_VCI(args, state_dict=None):
         args["num_outcomes"],
         args["num_treatments"],
         args["num_covariates"],
+        omega0=args["omega0"],
+        omega1=args["omega1"],
+        omega2=args["omega2"],
         outcome_dist=args["outcome_dist"],
         dist_mode=args["dist_mode"],
         patience=args["patience"],
@@ -54,6 +57,10 @@ class VCI(torch.nn.Module):
         embed_outcomes=True,
         embed_treatments=False,
         embed_covariates=True,
+        omega0=1.0,
+        omega1=2.0,
+        omega2=0.1,
+        mc_sample_size=30,
         outcome_dist="normal",
         dist_mode="match",
         best_score=-1e3,
@@ -69,6 +76,10 @@ class VCI(torch.nn.Module):
         self.embed_outcomes = embed_outcomes
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
+        self.omega0 = omega0
+        self.omega1 = omega1
+        self.omega2 = omega2
+        self.mc_sample_size = mc_sample_size
         self.outcome_dist = outcome_dist
         self.dist_mode = dist_mode
         # early-stopping
@@ -119,17 +130,10 @@ class VCI(torch.nn.Module):
             "discriminator_depth": 2,
             "estimator_width": 64,
             "estimator_depth": 2,
-            "indiv-spec_lh_weight": 1.0,
-            "covar-spec_lh_weight": 1.7,
-            "kl_divergence_weight": 0.1,
-            "mc_sample_size": 30,
-            "kde_kernel_std": 1.,
             "autoencoder_lr": 3e-4,
-            "classifier_lr": 3e-4,
             "discriminator_lr": 3e-4,
             "estimator_lr": 3e-4,
             "autoencoder_wd": 4e-7,
-            "classifier_wd": 4e-7,
             "discriminator_wd": 4e-7,
             "estimator_wd": 4e-7,
             "adversary_steps": 3,
@@ -529,13 +533,14 @@ class VCI(torch.nn.Module):
     def loss(self, outcomes, outcomes_dist_samp,
             cf_outcomes, cf_outcomes_out,
             latents_dist, cf_latents_dist,
-            treatments, covariates):
+            treatments, covariates,
+            kde_kernel_std=1.0):
         """
         Compute losses.
         """
         # individual-specific likelihood
         indiv_spec_nllh = -outcomes_dist_samp.log_prob(
-            outcomes.repeat(self.hparams["mc_sample_size"], 1)
+            outcomes.repeat(self.mc_sample_size, 1)
         ).mean()
 
         # covariate-specific likelihood
@@ -557,7 +562,7 @@ class VCI(torch.nn.Module):
             cf_outcomes = [o for (o, n) in zip(cf_outcomes, notNone) if n]
             cf_outcomes_out = cf_outcomes_out[notNone]
 
-            kernel_std = [self.hparams["kde_kernel_std"] * torch.ones_like(o) 
+            kernel_std = [kde_kernel_std * torch.ones_like(o) 
                 for o in cf_outcomes]
             covar_spec_nllh = -self.logprob(
                 cf_outcomes_out, (cf_outcomes, kernel_std), dist="normal"
@@ -574,7 +579,7 @@ class VCI(torch.nn.Module):
         return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
 
     def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
-                sample=True, detach_pattern=None):
+                rsample=True, detach_pattern=None):
         """
         Update VCI's parameters given a minibatch of outcomes, treatments, and
         cell types.
@@ -591,12 +596,12 @@ class VCI(torch.nn.Module):
 
         # p(y | z, t)
         outcomes_constr_samp = self.sample(latents_dist.mean, latents_dist.stddev,
-            treatments, size=self.hparams["mc_sample_size"]
+            treatments, size=self.mc_sample_size
         )
         outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
 
         # p(y' | z, t')
-        if sample:
+        if rsample:
             cf_outcomes_constr = self.decode(latents_dist.rsample(), cf_treatments)
             cf_outcomes_out = self.distributionize(cf_outcomes_constr).rsample()
         else:
@@ -609,7 +614,7 @@ class VCI(torch.nn.Module):
         elif detach_pattern == "full":
             cf_outcomes_in = cf_outcomes_out.detach()
         elif detach_pattern == "half":
-            if sample:
+            if rsample:
                 cf_outcomes_in = self.distributionize(
                     self.decode(latents_dist.sample(), cf_treatments)
                 ).rsample()
@@ -634,9 +639,9 @@ class VCI(torch.nn.Module):
             treatments, covariates
         )
 
-        loss = (self.hparams["indiv-spec_lh_weight"] * indiv_spec_nllh
-            + self.hparams["covar-spec_lh_weight"] * covar_spec_nllh
-            + self.hparams["kl_divergence_weight"] * kl_divergence
+        loss = (self.omega0 * indiv_spec_nllh
+            + self.omega1 * covar_spec_nllh
+            + self.omega2 * kl_divergence
         )
 
         self.optimizer_autoencoder.zero_grad()
