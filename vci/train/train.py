@@ -6,6 +6,7 @@ from collections import defaultdict
 import numpy as np
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 from ..evaluate.evaluate import evaluate, evaluate_classic
 
@@ -57,9 +58,11 @@ def train(args):
 
     pjson({"training_args": args})
     pjson({"model_params": model.hparams})
+    pjson({})
     args["hparams"] = model.hparams
 
     dt = datetime.now().strftime("%Y.%m.%d_%H:%M:%S")
+    writer = SummaryWriter(log_dir=os.path.join(args["artifact_path"], "runs/" + args["name"] + "_" + dt))
     save_dir = os.path.join(args["artifact_path"], "saves/" + args["name"] + "_" + dt)
     os.makedirs(save_dir, exist_ok=True)
 
@@ -116,6 +119,9 @@ def train(args):
                 }
             )
 
+            for key, val in epoch_training_stats.items():
+                writer.add_scalar(key, val, epoch)
+
             torch.save(
                 (model.state_dict(), args, model.history),
                 os.path.join(
@@ -136,4 +142,5 @@ def train(args):
                 pjson({"early_stop": epoch})
                 break
 
+    writer.close()
     return model

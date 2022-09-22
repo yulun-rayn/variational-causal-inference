@@ -33,9 +33,6 @@ def evaluate(model, datasets, batch_size=None):
                 datasets["test"].subset_condition(control=None),
                 batch_size=batch_size
             ),
-            "optimal for perturbations": 1 / datasets["test"].num_perturbations
-            if datasets["test"].num_perturbations > 0
-            else None,
         }
     model.train()
     return evaluation_stats
@@ -148,9 +145,6 @@ def evaluate_classic(model, datasets, batch_size=None):
                 datasets["test"].subset_condition(control=True),
                 batch_size=batch_size
             ),
-            "optimal for perturbations": 1 / datasets["test"].num_perturbations
-            if datasets["test"].num_perturbations > 0
-            else None,
         }
     model.train()
     return evaluation_stats
