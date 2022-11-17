@@ -20,8 +20,29 @@ conda activate vci-env
   \* *make sure to install the right versions for your toolkit*
 
 
+## Data
+
+Visit our [resource site](https://osf.io/5n2mz/), download the contents of `main/datasets` into [datasets](datasets). To see how to process your own dataset, download the contents of `data-prep/datasets` into [datasets](datasets) and follow the examples. A clean example of data preparation can be found in [SciplexPrep.ipynb](datasets/SciplexPrep.ipynb). For an example of data preparation on a messier dataset with thorough analysis and visualizations, see [MarsonPrep.ipynb](datasets/MarsonPrep.ipynb).
+
+In summary, the preparation procedure includes:
+
+-   Quality Control
+
+-   Normalization
+
+-   Gene Selection
+
+-   Field Specification
+
+-   (Optional) Dataset Split
+
+-   (Optional) Out-of-distribution Selection
+
+-   (Optional) Differentially-expressed Gene Ranking
+
+
 ## Run
-Once the environment is set up, the function call to train the model is:
+Once the environment is set up and the data are prepared, the function call to train the model is:
 
 ```bash
 ./main_train.sh &
