@@ -1,24 +1,29 @@
+import os
 import json
+import logging
+
 import numpy as np
 
+def initialize_logger(artifact_path, name=None, level='INFO'):
+    logfile = os.path.join(artifact_path, 'log.txt')
+    if name is None:
+        logger = logging.getLogger()
+    else:
+        logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    handler_console = logging.StreamHandler()
+    handler_file    = logging.FileHandler(logfile)
+
+    logger.addHandler(handler_console)
+    logger.addHandler(handler_file)
+    return logger
+
 def pjson(s):
-    """
-    Prints a string in JSON format and flushes stdout
-    """
     print(json.dumps(s), flush=True)
 
-def sjson(s, f):
-    # create json object from dictionary
-    s = json.dumps(s)
-
-    # open file for writing, "w" 
-    f = open(f, "w")
-
-    # write json object to file
-    f.write(s)
-
-    # close file
-    f.close()
+def ljson(s):
+    logging.info(json.dumps(s))
 
 def unique_ind(records_array):
     # creates an array of indices, sorted by unique element

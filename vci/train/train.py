@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from datetime import datetime
 from collections import defaultdict
 
@@ -14,7 +15,7 @@ from ..model.model import load_VCI
 
 from ..dataset.dataset import load_dataset_splits
 
-from ..utils.general_utils import pjson, sjson
+from ..utils.general_utils import initialize_logger, ljson
 from ..utils.data_utils import data_collate
 
 def prepare(args, state_dict=None):
@@ -56,15 +57,17 @@ def train(args):
         }
     )
 
-    pjson({"training_args": args})
-    pjson({"model_params": model.hparams})
-    pjson({})
     args["hparams"] = model.hparams
 
     dt = datetime.now().strftime("%Y.%m.%d_%H:%M:%S")
     writer = SummaryWriter(log_dir=os.path.join(args["artifact_path"], "runs/" + args["name"] + "_" + dt))
     save_dir = os.path.join(args["artifact_path"], "saves/" + args["name"] + "_" + dt)
     os.makedirs(save_dir, exist_ok=True)
+
+    initialize_logger(save_dir)
+    ljson({"training_args": args})
+    ljson({"model_params": model.hparams})
+    logging.info("")
 
     start_time = time.time()
     for epoch in range(args["max_epochs"]):
@@ -110,7 +113,7 @@ def train(args):
                 model.history[key].append(val)
             model.history["stats_epoch"].append(epoch)
 
-            pjson(
+            ljson(
                 {
                     "epoch": epoch,
                     "training_stats": epoch_training_stats,
@@ -130,7 +133,7 @@ def train(args):
                 ),
             )
 
-            pjson(
+            ljson(
                 {
                     "model_saved": "model_seed={}_epoch={}.pt\n".format(
                         args["seed"], epoch
@@ -139,7 +142,7 @@ def train(args):
             )
             stop = stop or model.early_stopping(np.mean(evaluation_stats["test"]))
             if stop:
-                pjson({"early_stop": epoch})
+                ljson({"early_stop": epoch})
                 break
 
     writer.close()
