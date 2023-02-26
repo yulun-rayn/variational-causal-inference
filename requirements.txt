@@ -3,12 +3,15 @@
 # platform: linux-64
 python=3.9
 
-tqdm=4.64.0
-numpy=1.22.3
-pandas=1.4.2
+tqdm=4.63.2
+numpy=1.23.5
+pandas=1.4.4
 pyyaml=5.4.1
-scanpy=1.9.1
-ipykernel=6.9.1
+scanpy=1.9.2
+seaborn=0.11.2
+ipykernel=6.15.3
+ipywidgets=8.0.4
+matplotlib=3.6.3
 python-wget=3.2
 tensorboard=2.5.0
 scikit-learn=1.0.2
