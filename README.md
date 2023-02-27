@@ -45,10 +45,10 @@ In summary, the preparation procedure includes:
 Once the environment is set up and the data are prepared, the function call to train the model is:
 
 ```bash
-./main_train.sh &
+./main.sh &
 ```
 
-A list of flags may be found in `main_train.sh` and `main_train.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
+A list of flags may be found in `main.sh` and `main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
 
 
 ## License

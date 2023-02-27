@@ -83,6 +83,7 @@ def train(args):
 
             for key, val in minibatch_training_stats.items():
                 epoch_training_stats[key] += val
+        model.update_eval_encoder()
 
         for key, val in epoch_training_stats.items():
             epoch_training_stats[key] = val / len(datasets["loader_tr"])

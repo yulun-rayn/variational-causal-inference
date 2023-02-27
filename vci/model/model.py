@@ -1,3 +1,4 @@
+import copy
 import json
 
 import torch
@@ -199,6 +200,8 @@ class VCI(torch.nn.Module):
         )
         params.extend(list(self.encoder.parameters()))
 
+        self.encoder_eval = copy.deepcopy(self.encoder)
+
         self.decoder = MLP(
             [self.hparams["latent_dim"]+treatment_dim]
             + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
@@ -334,7 +337,7 @@ class VCI(torch.nn.Module):
         else:
             raise ValueError("dist_mode not recognized")
 
-    def encode(self, outcomes, treatments, covariates):
+    def encode(self, outcomes, treatments, covariates, eval=False):
         if self.embed_outcomes:
             outcomes = self.outcomes_embeddings(outcomes)
         if self.embed_treatments:
@@ -346,7 +349,10 @@ class VCI(torch.nn.Module):
 
         inputs = torch.cat([outcomes, treatments] + covariates, -1)
 
-        return self.encoder(inputs)
+        if eval:
+            return self.encoder_eval(inputs)
+        else:
+            return self.encoder(inputs)
 
     def decode(self, latents, treatments):
         if self.embed_treatments:
@@ -538,12 +544,12 @@ class VCI(torch.nn.Module):
         """
         Compute losses.
         """
-        # individual-specific likelihood
+        # (1) individual-specific likelihood
         indiv_spec_nllh = -outcomes_dist_samp.log_prob(
             outcomes.repeat(self.mc_sample_size, 1)
         ).mean()
 
-        # covariate-specific likelihood
+        # (2) covariate-specific likelihood
         if self.dist_mode == "discriminate":
             if self.iteration % self.hparams["adversary_steps"]:
                 self.update_discriminator(
@@ -568,7 +574,7 @@ class VCI(torch.nn.Module):
                 cf_outcomes_out, (cf_outcomes, kernel_std), dist="normal"
             )
 
-        # kl divergence
+        # (3) kl divergence
         kl_divergence = kldiv_normal(
             latents_dist.mean,
             latents_dist.stddev,
@@ -579,7 +585,7 @@ class VCI(torch.nn.Module):
         return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
 
     def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
-                rsample=True, detach_pattern=None):
+                rsample=True, detach_encode=False, detach_eval=True):
         """
         Update VCI's parameters given a minibatch of outcomes, treatments, and
         cell types.
@@ -609,11 +615,7 @@ class VCI(torch.nn.Module):
             cf_outcomes_out = self.distributionize(cf_outcomes_constr).mean
 
         # q(z | y', x, t')
-        if detach_pattern is None:
-            cf_outcomes_in = cf_outcomes_out
-        elif detach_pattern == "full":
-            cf_outcomes_in = cf_outcomes_out.detach()
-        elif detach_pattern == "half":
+        if detach_encode:
             if rsample:
                 cf_outcomes_in = self.distributionize(
                     self.decode(latents_dist.sample(), cf_treatments)
@@ -623,10 +625,10 @@ class VCI(torch.nn.Module):
                     self.decode(latents_dist.mean.detach(), cf_treatments)
                 ).mean
         else:
-            raise ValueError("Unrecognized: detaching pattern of the counterfactual outcome "
-                "in the KL Divergence term.")
+            cf_outcomes_in = cf_outcomes_out
+
         cf_latents_constr = self.encode(
-            cf_outcomes_in, cf_treatments, covariates
+            cf_outcomes_in, cf_treatments, covariates, eval=detach_eval
         )
         cf_latents_dist = self.distributionize(
             cf_latents_constr, dim=self.hparams["latent_dim"], dist="normal"
@@ -672,6 +674,12 @@ class VCI(torch.nn.Module):
         self.optimizer_discriminator.step()
 
         return loss.item()
+
+    def update_eval_encoder(self):
+        for target_param, param in zip(
+            self.encoder_eval.parameters(), self.encoder.parameters()
+        ):
+            target_param.data.copy_(param.data)
 
     def early_stopping(self, score):
         """
