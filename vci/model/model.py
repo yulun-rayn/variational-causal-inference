@@ -129,6 +129,7 @@ class VCI(torch.nn.Module):
             "decoder_depth": 3,
             "discriminator_width": 64,
             "discriminator_depth": 2,
+            "discriminator_steps": 3,
             "estimator_width": 64,
             "estimator_depth": 2,
             "autoencoder_lr": 3e-4,
@@ -137,7 +138,6 @@ class VCI(torch.nn.Module):
             "autoencoder_wd": 4e-7,
             "discriminator_wd": 4e-7,
             "estimator_wd": 4e-7,
-            "adversary_steps": 3,
             "step_size_lr": 45,
         }
 
@@ -539,8 +539,8 @@ class VCI(torch.nn.Module):
     def loss(self, outcomes, outcomes_dist_samp,
             cf_outcomes, cf_outcomes_out,
             latents_dist, cf_latents_dist,
-            treatments, covariates,
-            kde_kernel_std=1.0):
+            treatments, cf_treatments,
+            covariates, kde_kernel_std=1.0):
         """
         Compute losses.
         """
@@ -551,13 +551,14 @@ class VCI(torch.nn.Module):
 
         # (2) covariate-specific likelihood
         if self.dist_mode == "discriminate":
-            if self.iteration % self.hparams["adversary_steps"]:
+            if self.iteration % self.hparams["discriminator_steps"]:
                 self.update_discriminator(
-                    outcomes, cf_outcomes_out.detach(), treatments, covariates
+                    outcomes, cf_outcomes_out.detach(),
+                    treatments, cf_treatments, covariates
                 )
 
             covar_spec_nllh = self.loss_discriminator(
-                self.discriminate(cf_outcomes_out, treatments, covariates),
+                self.discriminate(cf_outcomes_out, cf_treatments, covariates),
                 torch.ones(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
             )
         elif self.dist_mode == "fit":
@@ -635,10 +636,8 @@ class VCI(torch.nn.Module):
         )
 
         indiv_spec_nllh, covar_spec_nllh, kl_divergence = self.loss(
-            outcomes, outcomes_dist_samp,
-            cf_outcomes, cf_outcomes_out,
-            latents_dist, cf_latents_dist,
-            treatments, covariates
+            outcomes, outcomes_dist_samp, cf_outcomes, cf_outcomes_out,
+            latents_dist, cf_latents_dist, treatments, cf_treatments, covariates
         )
 
         loss = (self.omega0 * indiv_spec_nllh
@@ -657,14 +656,15 @@ class VCI(torch.nn.Module):
             "KL Divergence": kl_divergence.item()
         }
 
-    def update_discriminator(self, outcomes, cf_outcomes_out, treatments, covariates):
+    def update_discriminator(self, outcomes, cf_outcomes_out,
+                                treatments, cf_treatments, covariates):
         loss_tru = self.loss_discriminator(
             self.discriminate(outcomes, treatments, covariates),
             torch.ones(outcomes.size(0), device=outcomes.device)
         )
 
         loss_fls = self.loss_discriminator(
-            self.discriminate(cf_outcomes_out, treatments, covariates),
+            self.discriminate(cf_outcomes_out, cf_treatments, covariates),
             torch.zeros(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
         )
 
