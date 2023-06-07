@@ -129,7 +129,6 @@ class VCI(torch.nn.Module):
             "decoder_depth": 3,
             "discriminator_width": 64,
             "discriminator_depth": 2,
-            "discriminator_steps": 3,
             "estimator_width": 64,
             "estimator_depth": 2,
             "autoencoder_lr": 3e-4,
@@ -138,6 +137,7 @@ class VCI(torch.nn.Module):
             "autoencoder_wd": 4e-7,
             "discriminator_wd": 4e-7,
             "estimator_wd": 4e-7,
+            "discriminator_steps": 3,
             "step_size_lr": 45,
         }
 
@@ -586,7 +586,7 @@ class VCI(torch.nn.Module):
         return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
 
     def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
-                rsample=True, detach_encode=False, detach_eval=True):
+                sample_latent=True, sample_outcome=False, detach_encode=False, detach_eval=True):
         """
         Update VCI's parameters given a minibatch of outcomes, treatments, and
         cell types.
@@ -608,23 +608,25 @@ class VCI(torch.nn.Module):
         outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
 
         # p(y' | z, t')
-        if rsample:
-            cf_outcomes_constr = self.decode(latents_dist.rsample(), cf_treatments)
-            cf_outcomes_out = self.distributionize(cf_outcomes_constr).rsample()
+        if sample_latent:
+            cf_outcomes_constr_out = self.decode(latents_dist.rsample(), cf_treatments)
         else:
-            cf_outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
-            cf_outcomes_out = self.distributionize(cf_outcomes_constr).mean
+            cf_outcomes_constr_out = self.decode(latents_dist.mean, cf_treatments)
+        if sample_outcome:
+            cf_outcomes_out = self.distributionize(cf_outcomes_constr_out).rsample()
+        else:
+            cf_outcomes_out = self.distributionize(cf_outcomes_constr_out).mean
 
         # q(z | y', x, t')
         if detach_encode:
-            if rsample:
-                cf_outcomes_in = self.distributionize(
-                    self.decode(latents_dist.sample(), cf_treatments)
-                ).rsample()
+            if sample_latent:
+                cf_outcomes_constr_in = self.decode(latents_dist.sample(), cf_treatments)
             else:
-                cf_outcomes_in = self.distributionize(
-                    self.decode(latents_dist.mean.detach(), cf_treatments)
-                ).mean
+                cf_outcomes_constr_in = self.decode(latents_dist.mean.detach(), cf_treatments)
+            if sample_outcome:
+                cf_outcomes_in = self.distributionize(cf_outcomes_constr_in).rsample()
+            else:
+                cf_outcomes_in = self.distributionize(cf_outcomes_constr_in).mean
         else:
             cf_outcomes_in = cf_outcomes_out
 
