@@ -9,6 +9,7 @@
     "decoder_depth": 3, 
     "discriminator_width": 64, 
     "discriminator_depth": 2, 
+    "discriminator_steps": 3, 
     "estimator_width": 64, 
     "estimator_depth": 2, 
     "autoencoder_lr": 0.0003, 
@@ -17,6 +18,5 @@
     "autoencoder_wd": 4e-07, 
     "discriminator_wd": 4e-07, 
     "estimator_wd": 4e-07, 
-    "adversary_steps": 3, 
     "step_size_lr": 45
 }

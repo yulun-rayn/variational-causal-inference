@@ -82,7 +82,7 @@ def data_collate(batch, nb_dims=1):
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
                 raise TypeError(data_collate_err_msg_format.format(elem.dtype))
 
-            return data_collate([torch.as_tensor(b) for b in batch])
+            return data_collate([torch.as_tensor(b) for b in batch], nb_dims=nb_dims)
         elif elem.shape == ():  # scalars
             return torch.as_tensor(batch)
     elif isinstance(elem, float):
@@ -93,12 +93,12 @@ def data_collate(batch, nb_dims=1):
         return batch
     elif isinstance(elem, collections.abc.Mapping):
         try:
-            return elem_type({key: data_collate([d[key] for d in batch]) for key in elem})
+            return elem_type({key: data_collate([d[key] for d in batch], nb_dims=nb_dims) for key in elem})
         except TypeError:
             # The mapping type may not support `__init__(iterable)`.
-            return {key: data_collate([d[key] for d in batch]) for key in elem}
+            return {key: data_collate([d[key] for d in batch], nb_dims=nb_dims) for key in elem}
     elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
-        return elem_type(*(data_collate(samples) for samples in zip(*batch)))
+        return elem_type(*(data_collate(samples, nb_dims=nb_dims) for samples in zip(*batch)))
     elif isinstance(elem, collections.abc.Sequence):
         # check to make sure that the elements in batch have consistent size
         it = iter(batch)
@@ -108,13 +108,13 @@ def data_collate(batch, nb_dims=1):
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
 
         if isinstance(elem, tuple):
-            return [data_collate(samples) for samples in transposed]  # Backwards compatibility.
+            return [data_collate(samples, nb_dims=nb_dims) for samples in transposed]  # Backwards compatibility.
         else:
             try:
-                return elem_type([data_collate(samples) for samples in transposed])
+                return elem_type([data_collate(samples, nb_dims=nb_dims) for samples in transposed])
             except TypeError:
                 # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-                return [data_collate(samples) for samples in transposed]
+                return [data_collate(samples, nb_dims=nb_dims) for samples in transposed]
 
     raise TypeError(data_collate_err_msg_format.format(elem_type))
 
