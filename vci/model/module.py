@@ -23,8 +23,12 @@ class MLP(torch.nn.Module):
     A multilayer perceptron with ReLU activations and optional BatchNorm.
     """
 
-    def __init__(self, sizes, batch_norm=True, final_act=None):
+    def __init__(self, sizes, heads=None, batch_norm=True, final_act=None):
         super(MLP, self).__init__()
+        self.heads = heads
+        if heads is not None:
+            sizes[-1] = sizes[-1] * heads
+
         layers = []
         for s in range(len(sizes) - 1):
             layers += [
@@ -52,7 +56,11 @@ class MLP(torch.nn.Module):
         self.network = torch.nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.network(x)
+        out = self.network(x)
+        if self.heads is not None:
+            out = out.view(*out.shape[:-1], -1, self.heads)
+
+        return out
 
 
 class NegativeBinomial(Distribution):

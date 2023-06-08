@@ -3,13 +3,14 @@ import json
 
 import torch
 import torch.nn.functional as F
-from torch.distributions import Normal
+from torch.distributions import Normal, Bernoulli
 
 from .module import MLP, NegativeBinomial, ZeroInflatedNegativeBinomial
 
 from ..utils.math_utils import (
-    kldiv_normal,
     logprob_normal,
+    kldiv_normal,
+    logprob_bernoulli_logits,
     logprob_nb_positive,
     logprob_zinb_positive
 )
@@ -94,6 +95,8 @@ class VCI(torch.nn.Module):
             self.num_dist_params = 3
         elif self.outcome_dist == "normal":
             self.num_dist_params = 2
+        elif self.outcome_dist == "bernoulli":
+            self.num_dist_params = 1
         else:
             raise ValueError("outcome_dist not recognized")
 
@@ -195,8 +198,8 @@ class VCI(torch.nn.Module):
         self.encoder = MLP(
             [outcome_dim+treatment_dim+covariate_dim]
             + [self.hparams["encoder_width"]] * (self.hparams["encoder_depth"] - 1)
-            + [self.hparams["latent_dim"] * 2],
-            final_act="relu"
+            + [self.hparams["latent_dim"]],
+            heads=2, final_act="relu"
         )
         params.extend(list(self.encoder.parameters()))
 
@@ -205,7 +208,8 @@ class VCI(torch.nn.Module):
         self.decoder = MLP(
             [self.hparams["latent_dim"]+treatment_dim]
             + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
-            + [self.num_outcomes * self.num_dist_params]
+            + [self.num_outcomes],
+            heads=self.num_dist_params
         )
         params.extend(list(self.decoder.parameters()))
 
@@ -315,9 +319,9 @@ class VCI(torch.nn.Module):
             self.outcome_estimator = MLP(
                 [treatment_dim+covariate_dim]
                 + [self.hparams["estimator_width"]] * (self.hparams["estimator_depth"] - 1)
-                + [self.num_outcomes * self.num_dist_params]
+                + [self.num_outcomes],
+                heads=self.num_dist_params
             )
-            self.loss_outcome_estimator = torch.nn.MSELoss()
             params.extend(list(self.outcome_estimator.parameters()))
 
             self.optimizer_estimator = torch.optim.Adam(
@@ -394,23 +398,28 @@ class VCI(torch.nn.Module):
             dist = self.outcome_dist
 
         if dist == "nb":
-            mus = F.softplus(constructions[:, :dim]).add(eps)
-            thetas = F.softplus(constructions[:, dim:]).add(eps)
+            mus = F.softplus(constructions[..., 0]).add(eps)
+            thetas = F.softplus(constructions[..., 1]).add(eps)
             dist = NegativeBinomial(
                 mu=mus, theta=thetas
             )
         elif dist == "zinb":
-            mus = F.softplus(constructions[:, :dim]).add(eps)
-            thetas = F.softplus(constructions[:, dim:(2*dim)]).add(eps)
-            zi_logits = constructions[:, (2*dim):].add(eps)
+            mus = F.softplus(constructions[..., 0]).add(eps)
+            thetas = F.softplus(constructions[..., 1]).add(eps)
+            zi_logits = constructions[..., 2].add(eps)
             dist = ZeroInflatedNegativeBinomial(
                 mu=mus, theta=thetas, zi_logits=zi_logits
             )
         elif dist == "normal":
-            locs = constructions[:, :dim]
-            scales = F.softplus(constructions[:, dim:]).add(eps)
+            locs = constructions[..., 0]
+            scales = F.softplus(constructions[..., 1]).add(eps)
             dist = Normal(
                 loc=locs, scale=scales
+            )
+        elif dist == "bernoulli":
+            logits = constructions[..., 0]
+            dist = Bernoulli(
+                logits=logits
             )
 
         return dist
@@ -531,6 +540,11 @@ class VCI(torch.nn.Module):
             logprob = logprob_normal(outcomes,
                 loc=outcomes_param[0],
                 scale=outcomes_param[1],
+                weight=weights
+            )
+        elif dist == "bernoulli":
+            logprob = logprob_bernoulli_logits(outcomes,
+                loc=outcomes_param[0],
                 weight=weights
             )
 

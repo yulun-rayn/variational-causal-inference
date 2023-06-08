@@ -30,6 +30,9 @@ def kldiv_normal(mu1: torch.Tensor, sigma1: torch.Tensor,
     return torch.mean(-0.5 * torch.sum(1. + logvar1-logvar2 
         - (mu1-mu2)** 2 - (logvar1-logvar2).exp(), dim = 1), dim = 0)
 
+def logprob_bernoulli_logits(x, logit, weight=None):
+    return -F.binary_cross_entropy_with_logits(logit, x, weight=weight, reduction='none')
+
 def logprob_zinb_positive(
     x: torch.Tensor,
     mu: torch.Tensor,
