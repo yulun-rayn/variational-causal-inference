@@ -3,9 +3,9 @@ import json
 
 import torch
 import torch.nn.functional as F
-from torch.distributions import Normal, Bernoulli
+from torch.distributions import Normal
 
-from .module import MLP, NegativeBinomial, ZeroInflatedNegativeBinomial
+from .module import MLP, Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
 
 from ..utils.math_utils import (
     logprob_normal,
@@ -560,7 +560,7 @@ class VCI(torch.nn.Module):
         """
         # (1) individual-specific likelihood
         indiv_spec_nllh = -outcomes_dist_samp.log_prob(
-            outcomes.repeat(self.mc_sample_size, 1)
+            outcomes.repeat(self.mc_sample_size, *[1]*(outcomes.dim()-1))
         ).mean()
 
         # (2) covariate-specific likelihood

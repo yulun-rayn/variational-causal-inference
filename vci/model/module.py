@@ -2,10 +2,11 @@ import warnings
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-from torch.distributions import Distribution, Gamma, Poisson, constraints
+import torch.nn.functional as F
+from torch.distributions import Distribution, ExponentialFamily, Gamma, Poisson, constraints
 from torch.distributions.utils import (
-    broadcast_all,
     lazy_property,
+    broadcast_all,
     logits_to_probs,
     probs_to_logits,
 )
@@ -57,10 +58,75 @@ class MLP(torch.nn.Module):
 
     def forward(self, x):
         out = self.network(x)
+
         if self.heads is not None:
             out = out.view(*out.shape[:-1], -1, self.heads)
-
         return out
+
+
+class Bernoulli(ExponentialFamily):
+    r"""
+    Creates a Bernoulli distribution parameterized by :attr:`probs`
+    or :attr:`logits` (but not both).
+
+    Samples are binary (0 or 1). They take the value `1` with probability `p`
+    and `0` with probability `1 - p`.
+
+    Example::
+
+        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> m = Bernoulli(torch.tensor([0.3]))
+        >>> m.sample()  # 30% chance 1; 70% chance 0
+        tensor([ 0.])
+
+    Args:
+        probs (Number, Tensor): the probability of sampling `1`
+        logits (Number, Tensor): the log-odds of sampling `1`
+    """
+    arg_constraints = {'probs': constraints.unit_interval,
+                       'logits': constraints.real}
+    support = constraints.boolean
+
+    def __init__(self, probs=None, logits=None, validate_args=None):
+        if (probs is None) == (logits is None):
+            raise ValueError("Either `probs` or `logits` must be specified, but not both.")
+        if probs is not None:
+            self.probs, = broadcast_all(probs)
+        else:
+            self.logits, = broadcast_all(logits)
+        self._param = self.probs if probs is not None else self.logits
+        batch_shape = self._param.size()
+        super().__init__(batch_shape, validate_args=validate_args)
+
+    @property
+    def mean(self):
+        return self.probs
+
+    @property
+    def variance(self):
+        return self.probs * (1 - self.probs)
+
+    @lazy_property
+    def logits(self):
+        return probs_to_logits(self.probs, is_binary=True)
+
+    @lazy_property
+    def probs(self):
+        return logits_to_probs(self.logits, is_binary=True)
+
+    def sample(self, sample_shape=torch.Size()):
+        shape = self._extended_shape(sample_shape)
+        with torch.no_grad():
+            return torch.bernoulli(self.probs.expand(shape))
+
+    def log_prob(self, value):
+        #if self._validate_args:
+        #    self._validate_sample(value)
+        logits, value = broadcast_all(self.logits, value)
+        return -F.binary_cross_entropy_with_logits(logits, value, reduction='none')
+
+    def entropy(self):
+        return F.binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none')
 
 
 class NegativeBinomial(Distribution):
@@ -148,15 +214,8 @@ class NegativeBinomial(Distribution):
             return counts
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
-        if self._validate_args:
-            try:
-                self._validate_sample(value)
-            except ValueError:
-                warnings.warn(
-                    "The value argument must be within the support of the distribution",
-                    UserWarning,
-                )
-
+        #if self._validate_args:
+        #    self._validate_sample(value)
         return logprob_nb_positive(value, mu=self.mu, theta=self.theta)
 
 
@@ -245,11 +304,6 @@ class ZeroInflatedNegativeBinomial(NegativeBinomial):
             return samp
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
-        try:
-            self._validate_sample(value)
-        except ValueError:
-            warnings.warn(
-                "The value argument must be within the support of the distribution",
-                UserWarning,
-            )
+        #if self._validate_args:
+        #    self._validate_sample(value)
         return logprob_zinb_positive(value, self.mu, self.theta, self.zi_logits)
