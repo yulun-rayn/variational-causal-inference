@@ -15,7 +15,7 @@ conda activate vci-env
 ```
 
 ### 2. Install Learning Libraries
-- [Pytorch](https://pytorch.org/) [**1.11**.0](https://pytorch.org/get-started/previous-versions/)
+- [Pytorch](https://pytorch.org/) [**1.13**.1](https://pytorch.org/get-started/previous-versions/)
 
   \* *make sure to install the right versions for your toolkit*
 
