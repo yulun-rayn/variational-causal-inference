@@ -2,6 +2,7 @@ import warnings
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Distribution, ExponentialFamily, Gamma, Poisson, constraints
 from torch.distributions.utils import (
@@ -19,7 +20,7 @@ from ..utils.math_utils import (
 )
 
 
-class MLP(torch.nn.Module):
+class MLP(nn.Module):
     """
     A multilayer perceptron with ReLU activations and optional BatchNorm.
     """
@@ -33,28 +34,28 @@ class MLP(torch.nn.Module):
         layers = []
         for s in range(len(sizes) - 1):
             layers += [
-                torch.nn.Linear(sizes[s], sizes[s + 1]),
-                torch.nn.BatchNorm1d(sizes[s + 1])
+                nn.Linear(sizes[s], sizes[s + 1]),
+                nn.BatchNorm1d(sizes[s + 1])
                 if batch_norm and s < len(sizes) - 2
                 else None,
-                torch.nn.ReLU()
+                nn.ReLU()
                 if s < len(sizes) - 2
                 else None
             ]
         if final_act is None:
             pass
         elif final_act == "relu":
-            layers += [torch.nn.ReLU()]
+            layers += [nn.ReLU()]
         elif final_act == "sigmoid":
-            layers += [torch.nn.Sigmoid()]
+            layers += [nn.Sigmoid()]
         elif final_act == "softmax":
-            layers += [torch.nn.Softmax(dim=-1)]
+            layers += [nn.Softmax(dim=-1)]
         else:
             raise ValueError("final_act not recognized")
 
         layers = [l for l in layers if l is not None]
 
-        self.network = torch.nn.Sequential(*layers)
+        self.network = nn.Sequential(*layers)
 
     def forward(self, x):
         out = self.network(x)

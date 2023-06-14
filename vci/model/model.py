@@ -2,6 +2,7 @@ import copy
 import json
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
@@ -50,7 +51,7 @@ def load_VCI(args, state_dict=None):
 #                     MAIN MODEL                    #
 #####################################################
 
-class VCI(torch.nn.Module):
+class VCI(nn.Module):
     def __init__(
         self,
         num_outcomes,
@@ -71,13 +72,23 @@ class VCI(torch.nn.Module):
         hparams=""
     ):
         super(VCI, self).__init__()
-        # set generic attributes
+        # set hyperparameters
+        self._set_hparams_(hparams)
+
+        # generic attributes
         self.num_outcomes = num_outcomes
         self.num_treatments = num_treatments
         self.num_covariates = num_covariates
         self.embed_outcomes = embed_outcomes
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
+        self.outcome_dim = (
+            self.hparams["outcome_emb_dim"] if embed_outcomes else num_outcomes)
+        self.treatment_dim = (
+            self.hparams["treatment_emb_dim"] if embed_treatments else num_treatments)
+        self.covariate_dim = (
+            self.hparams["covariate_emb_dim"]*len(num_covariates) if embed_covariates else sum(num_covariates))
+        # vci parameters
         self.omega0 = omega0
         self.omega1 = omega1
         self.omega2 = omega2
@@ -99,9 +110,6 @@ class VCI(torch.nn.Module):
             self.num_dist_params = 1
         else:
             raise ValueError("outcome_dist not recognized")
-
-        # set hyperparameters
-        self._set_hparams_(hparams)
 
         # individual-specific model
         self._init_indiv_model()
@@ -132,14 +140,10 @@ class VCI(torch.nn.Module):
             "decoder_depth": 3,
             "discriminator_width": 64,
             "discriminator_depth": 2,
-            "estimator_width": 64,
-            "estimator_depth": 2,
             "autoencoder_lr": 3e-4,
             "discriminator_lr": 3e-4,
-            "estimator_lr": 3e-4,
             "autoencoder_wd": 4e-7,
             "discriminator_wd": 4e-7,
-            "estimator_wd": 4e-7,
             "discriminator_steps": 3,
             "step_size_lr": 45,
         }
@@ -160,59 +164,28 @@ class VCI(torch.nn.Module):
 
         # embeddings
         if self.embed_outcomes:
-            self.outcomes_embeddings = MLP(
-                [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act="relu"
-            )
-            outcome_dim = self.hparams["outcome_emb_dim"]
+            self.outcomes_embeddings = self.init_outcome_emb()
             params.extend(list(self.outcomes_embeddings.parameters()))
-        else:
-            outcome_dim = self.num_outcomes
 
         if self.embed_treatments:
-            self.treatments_embeddings = torch.nn.Embedding(
-                self.num_treatments, self.hparams["treatment_emb_dim"]
-            )
-            treatment_dim = self.hparams["treatment_emb_dim"]
+            self.treatments_embeddings = self.init_treatment_emb()
             params.extend(list(self.treatments_embeddings.parameters()))
-        else:
-            treatment_dim = self.num_treatments
 
         if self.embed_covariates:
-            self.covariates_embeddings = []
-            for num_covariate in self.num_covariates:
-                self.covariates_embeddings.append(
-                    torch.nn.Embedding(num_covariate, 
-                        self.hparams["covariate_emb_dim"]
-                    )
-                )
-            self.covariates_embeddings = torch.nn.Sequential(
-                *self.covariates_embeddings
-            )
-            covariate_dim = self.hparams["covariate_emb_dim"]*len(self.num_covariates)
+            self.covariates_embeddings = nn.Sequential(*self.init_covariates_emb())
             for emb in self.covariates_embeddings:
                 params.extend(list(emb.parameters()))
-        else:
-            covariate_dim = sum(self.num_covariates)
 
         # models
-        self.encoder = MLP(
-            [outcome_dim+treatment_dim+covariate_dim]
-            + [self.hparams["encoder_width"]] * (self.hparams["encoder_depth"] - 1)
-            + [self.hparams["latent_dim"]],
-            heads=2, final_act="relu"
-        )
+        self.encoder = self.init_encoder()
         params.extend(list(self.encoder.parameters()))
 
         self.encoder_eval = copy.deepcopy(self.encoder)
 
-        self.decoder = MLP(
-            [self.hparams["latent_dim"]+treatment_dim]
-            + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
-            + [self.num_outcomes],
-            heads=self.num_dist_params
-        )
+        self.decoder = self.init_decoder()
         params.extend(list(self.decoder.parameters()))
 
+        # optimizer
         self.optimizer_autoencoder = torch.optim.Adam(
             params,
             lr=self.hparams["autoencoder_lr"],
@@ -231,47 +204,21 @@ class VCI(torch.nn.Module):
 
             # embeddings
             if self.embed_outcomes:
-                self.adv_outcomes_emb = MLP(
-                    [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act="relu"
-                )
-                outcome_dim = self.hparams["outcome_emb_dim"]
+                self.adv_outcomes_emb = self.init_outcome_emb()
                 params.extend(list(self.adv_outcomes_emb.parameters()))
-            else:
-                outcome_dim = self.num_outcomes
 
             if self.embed_treatments:
-                self.adv_treatments_emb = torch.nn.Embedding(
-                    self.num_treatments, self.hparams["treatment_emb_dim"]
-                )
-                treatment_dim = self.hparams["treatment_emb_dim"]
+                self.adv_treatments_emb = self.init_treatment_emb()
                 params.extend(list(self.adv_treatments_emb.parameters()))
-            else:
-                treatment_dim = self.num_treatments
 
             if self.embed_covariates:
-                self.adv_covariates_emb = []
-                for num_covariate in self.num_covariates:
-                    self.adv_covariates_emb.append(
-                        torch.nn.Embedding(num_covariate, 
-                            self.hparams["covariate_emb_dim"]
-                        )
-                    )
-                self.adv_covariates_emb = torch.nn.Sequential(
-                    *self.adv_covariates_emb
-                )
-                covariate_dim = self.hparams["covariate_emb_dim"]*len(self.num_covariates)
+                self.adv_covariates_emb = nn.Sequential(*self.init_covariates_emb())
                 for emb in self.adv_covariates_emb:
                     params.extend(list(emb.parameters()))
-            else:
-                covariate_dim = sum(self.num_covariates)
 
             # model
-            self.discriminator = MLP(
-                [outcome_dim+treatment_dim+covariate_dim]
-                + [self.hparams["discriminator_width"]] * (self.hparams["discriminator_depth"] - 1)
-                + [1]
-            )
-            self.loss_discriminator = torch.nn.BCEWithLogitsLoss()
+            self.discriminator = self.init_discriminator()
+            self.loss_discriminator = nn.BCEWithLogitsLoss()
             params.extend(list(self.discriminator.parameters()))
 
             self.optimizer_discriminator = torch.optim.Adam(
@@ -286,54 +233,8 @@ class VCI(torch.nn.Module):
             return self.discriminator
 
         elif self.dist_mode == "fit":
-            params = []
-
-            # embeddings
-            if self.embed_treatments:
-                self.adv_treatments_emb = torch.nn.Embedding(
-                    self.num_treatments, self.hparams["treatment_emb_dim"]
-                )
-                treatment_dim = self.hparams["treatment_emb_dim"]
-                params.extend(list(self.adv_treatments_emb.parameters()))
-            else:
-                treatment_dim = self.num_treatments
-
-            if self.embed_covariates:
-                self.adv_covariates_emb = []
-                for num_covariate in self.num_covariates:
-                    self.adv_covariates_emb.append(
-                        torch.nn.Embedding(num_covariate, 
-                            self.hparams["covariate_emb_dim"]
-                        )
-                    )
-                self.adv_covariates_emb = torch.nn.Sequential(
-                    *self.adv_covariates_emb
-                )
-                covariate_dim = self.hparams["covariate_emb_dim"]*len(self.num_covariates)
-                for emb in self.adv_covariates_emb:
-                    params.extend(list(emb.parameters()))
-            else:
-                covariate_dim = sum(self.num_covariates)
-
-            # model
-            self.outcome_estimator = MLP(
-                [treatment_dim+covariate_dim]
-                + [self.hparams["estimator_width"]] * (self.hparams["estimator_depth"] - 1)
-                + [self.num_outcomes],
-                heads=self.num_dist_params
-            )
-            params.extend(list(self.outcome_estimator.parameters()))
-
-            self.optimizer_estimator = torch.optim.Adam(
-                params,
-                lr=self.hparams["estimator_lr"],
-                weight_decay=self.hparams["estimator_wd"],
-            )
-            self.scheduler_estimator = torch.optim.lr_scheduler.StepLR(
-                self.optimizer_estimator, step_size=self.hparams["step_size_lr"]
-            )
-
-            return self.outcome_estimator
+            raise NotImplementedError(
+                'TODO: implement dist_mode "fit" for distribution loss')
 
         elif self.dist_mode == "match":
             return None
@@ -345,10 +246,11 @@ class VCI(torch.nn.Module):
         if self.embed_outcomes:
             outcomes = self.outcomes_embeddings(outcomes)
         if self.embed_treatments:
-            treatments = self.treatments_embeddings(treatments.argmax(1))
+            treatments = self.treatments_embeddings(
+                treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
         if self.embed_covariates:
-            covariates = [emb(covar.argmax(1)) 
-                for covar, emb in zip(covariates, self.covariates_embeddings)
+            covariates = [emb(covars if covars.shape[-1] == 1 else covars.argmax(1)) 
+                for covars, emb in zip(covariates, self.covariates_embeddings)
             ]
 
         inputs = torch.cat([outcomes, treatments] + covariates, -1)
@@ -360,7 +262,8 @@ class VCI(torch.nn.Module):
 
     def decode(self, latents, treatments):
         if self.embed_treatments:
-            treatments = self.treatments_embeddings(treatments.argmax(1))
+            treatments = self.treatments_embeddings(
+                treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
 
         inputs = torch.cat([latents, treatments], -1)
 
@@ -370,12 +273,13 @@ class VCI(torch.nn.Module):
         if self.embed_outcomes:
             outcomes = self.adv_outcomes_emb(outcomes)
         if self.embed_treatments:
-            treatments = self.adv_treatments_emb(treatments.argmax(1))
+            treatments = self.adv_treatments_emb(
+                treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
         if self.embed_covariates:
-            covariates = [emb(covar.argmax(1)) 
-                for covar, emb in zip(covariates, self.adv_covariates_emb)
+            covariates = [emb(covars if covars.shape[-1] == 1 else covars.argmax(1)) 
+                for covars, emb in zip(covariates, self.covariates_embeddings)
             ]
-        
+
         inputs = torch.cat([outcomes, treatments] + covariates, -1)
 
         return self.discriminator(inputs).squeeze()
@@ -710,6 +614,54 @@ class VCI(torch.nn.Module):
             self.patience_trials += 1
 
         return self.patience_trials > self.patience
+
+    def init_outcome_emb(self):
+        return MLP(
+            [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act="relu"
+        )
+
+    def init_treatment_emb(self):
+        if self.num_treatments == 1:
+            return MLP(
+                [1, self.hparams["covariate_emb_dim"]], final_act="relu"
+            )
+        else:
+            return nn.Embedding(
+                self.num_treatments, self.hparams["covariate_emb_dim"]
+            )
+
+    def init_covariates_emb(self):
+        adv_covariates_emb = []
+        for num_covariate in self.num_covariates:
+            if num_covariate == 1:
+                adv_covariates_emb.append(MLP(
+                        [1, self.hparams["covariate_emb_dim"]], final_act="relu"
+                    ))
+            else:
+                adv_covariates_emb.append(nn.Embedding(
+                        num_covariate, self.hparams["covariate_emb_dim"]
+                    ))
+        return adv_covariates_emb
+    
+    def init_encoder(self):
+        return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
+            + [self.hparams["encoder_width"]] * (self.hparams["encoder_depth"] - 1)
+            + [self.hparams["latent_dim"]],
+            heads=2, final_act="relu"
+        )
+    
+    def init_decoder(self):
+        return MLP([self.hparams["latent_dim"]+self.treatment_dim]
+            + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
+            + [self.num_outcomes],
+            heads=self.num_dist_params
+        )
+    
+    def init_discriminator(self):
+        return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
+            + [self.hparams["discriminator_width"]] * (self.hparams["discriminator_depth"] - 1)
+            + [1]
+        )
 
     def move_input(self, input):
         """
