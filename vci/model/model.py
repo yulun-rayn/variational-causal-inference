@@ -503,15 +503,11 @@ class VCI(nn.Module):
 
         return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
 
-    def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates,
+    def forward(self, outcomes, treatments, cf_treatments, covariates,
                 sample_latent=True, sample_outcome=False, detach_encode=False, detach_eval=True):
         """
-        Update VCI's parameters given a minibatch of outcomes, treatments, and
-        cell types.
+        Execute the workflow.
         """
-        outcomes, treatments, cf_outcomes, cf_treatments, covariates = self.move_inputs(
-            outcomes, treatments, cf_outcomes, cf_treatments, covariates
-        )
 
         # q(z | y, x, t)
         latents_constr = self.encode(outcomes, treatments, covariates)
@@ -553,6 +549,20 @@ class VCI(nn.Module):
         )
         cf_latents_dist = self.distributionize(
             cf_latents_constr, dim=self.hparams["latent_dim"], dist="normal"
+        )
+
+        return (outcomes_dist_samp, cf_outcomes_out,latents_dist, cf_latents_dist)
+
+    def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates):
+        """
+        Update VCI's parameters given a minibatch of outcomes, treatments, and covariates.
+        """
+        outcomes, treatments, cf_outcomes, cf_treatments, covariates = self.move_inputs(
+            outcomes, treatments, cf_outcomes, cf_treatments, covariates
+        )
+
+        outcomes_dist_samp, cf_outcomes_out,latents_dist, cf_latents_dist = self.forward(
+            outcomes, treatments, cf_treatments, covariates
         )
 
         indiv_spec_nllh, covar_spec_nllh, kl_divergence = self.loss(
