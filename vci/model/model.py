@@ -631,17 +631,17 @@ class VCI(nn.Module):
             )
 
     def init_covariates_emb(self):
-        adv_covariates_emb = []
+        covariates_emb = []
         for num_covariate in self.num_covariates:
             if num_covariate == 1:
-                adv_covariates_emb.append(MLP(
+                covariates_emb.append(MLP(
                         [1, self.hparams["covariate_emb_dim"]], final_act="relu"
                     ))
             else:
-                adv_covariates_emb.append(nn.Embedding(
+                covariates_emb.append(nn.Embedding(
                         num_covariate, self.hparams["covariate_emb_dim"]
                     ))
-        return adv_covariates_emb
+        return covariates_emb
     
     def init_encoder(self):
         return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
