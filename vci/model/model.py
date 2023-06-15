@@ -387,7 +387,7 @@ class VCI(nn.Module):
             )
 
             outcomes_constr_samp = self.sample(
-                latents_dist.mean, latents_dist.stddev, treatments
+                latents_dist.mean, latents_dist.stddev, cf_treatments
             )
             outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
 
