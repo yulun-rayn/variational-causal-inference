@@ -277,7 +277,7 @@ class VCI(nn.Module):
                 treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
         if self.embed_covariates:
             covariates = [emb(covars if covars.shape[-1] == 1 else covars.argmax(1)) 
-                for covars, emb in zip(covariates, self.covariates_embeddings)
+                for covars, emb in zip(covariates, self.adv_covariates_emb)
             ]
 
         inputs = torch.cat([outcomes, treatments] + covariates, -1)
