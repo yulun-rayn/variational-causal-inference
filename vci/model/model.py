@@ -623,11 +623,11 @@ class VCI(nn.Module):
     def init_treatment_emb(self):
         if self.num_treatments == 1:
             return MLP(
-                [1, self.hparams["covariate_emb_dim"]], final_act="relu"
+                [1, self.hparams["treatment_emb_dim"]], final_act="relu"
             )
         else:
             return nn.Embedding(
-                self.num_treatments, self.hparams["covariate_emb_dim"]
+                self.num_treatments, self.hparams["treatment_emb_dim"]
             )
 
     def init_covariates_emb(self):
