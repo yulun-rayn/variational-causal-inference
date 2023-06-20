@@ -8,23 +8,23 @@ from ..utils.general_utils import unique_ind
 
 def evaluate(model, datasets, batch_size=None):
     """
-    Measure quality metrics using `evaluate()` on the training, test, and
+    Measure quality metrics using `evaluate()` on the train, test, and
     out-of-distribution (ood) splits.
     """
 
     model.eval()
     with torch.no_grad():
         evaluation_stats = {
-            "training": evaluate_r2(
+            "train": evaluate_r2(
                 model,
-                datasets["training"].subset_condition(control=False),
-                datasets["training"].subset_condition(control=None),
+                datasets["train"].subset_condition(control=False),
+                datasets["train"].subset_condition(control=None),
                 batch_size=batch_size
             ),
             "test": evaluate_r2(
                 model,
                 datasets["test"].subset_condition(control=False),
-                datasets["training"].subset_condition(control=None),
+                datasets["train"].subset_condition(control=None),
                 batch_size=batch_size
             ),
             "ood": evaluate_r2(
@@ -127,10 +127,10 @@ def evaluate_classic(model, datasets, batch_size=None):
     model.eval()
     with torch.no_grad():
         evaluation_stats = {
-            "training": evaluate_r2_classic(
+            "train": evaluate_r2_classic(
                 model,
-                datasets["training"].subset_condition(control=False),
-                datasets["training"].subset_condition(control=True),
+                datasets["train"].subset_condition(control=False),
+                datasets["train"].subset_condition(control=True),
                 batch_size=batch_size
             ),
             "test": evaluate_r2_classic(

@@ -23,20 +23,35 @@ def prepare(args, state_dict=None):
     Instantiates model and dataset to run an experiment.
     """
 
+    # dataset
     datasets = load_dataset_splits(
         args["data_path"],
         sample_cf=(True if args["dist_mode"] == "match" else False),
     )
 
-    args["num_outcomes"] = datasets["training"].num_genes
-    args["num_treatments"] = datasets["training"].num_perturbations
-    args["num_covariates"] = datasets["training"].num_covariates
+    datasets.update(
+        {
+            "loader_tr": torch.utils.data.DataLoader(
+                datasets["train"],
+                batch_size=args["batch_size"],
+                shuffle=True,
+                collate_fn=(lambda batch: data_collate(batch, nb_dims=1))
+            )
+        }
+    )
 
+    args["num_outcomes"] = datasets["train"].num_outcomes
+    args["num_treatments"] = datasets["train"].num_treatments
+    args["num_covariates"] = datasets["train"].num_covariates
+
+    # model
     model = load_VCI(args, state_dict)
+
+    args["hparams"] = model.hparams
 
     return model, datasets
 
-def train(args):
+def train(args, prepare=prepare):
     """
     Trains a VCI model
     """
@@ -45,19 +60,6 @@ def train(args):
         torch.manual_seed(args["seed"])
 
     model, datasets = prepare(args)
-
-    datasets.update(
-        {
-            "loader_tr": torch.utils.data.DataLoader(
-                datasets["training"],
-                batch_size=args["batch_size"],
-                shuffle=True,
-                collate_fn=(lambda batch: data_collate(batch, nb_dims=1))
-            )
-        }
-    )
-
-    args["hparams"] = model.hparams
 
     dt = datetime.now().strftime("%Y.%m.%d_%H:%M:%S")
     writer = SummaryWriter(log_dir=os.path.join(args["artifact_path"], "runs/" + args["name"] + "_" + dt))

@@ -561,7 +561,7 @@ class VCI(nn.Module):
             outcomes, treatments, cf_outcomes, cf_treatments, covariates
         )
 
-        outcomes_dist_samp, cf_outcomes_out,latents_dist, cf_latents_dist = self.forward(
+        outcomes_dist_samp, cf_outcomes_out, latents_dist, cf_latents_dist = self.forward(
             outcomes, treatments, cf_treatments, covariates
         )
 

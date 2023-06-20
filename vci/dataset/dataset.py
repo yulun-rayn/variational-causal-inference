@@ -167,8 +167,8 @@ class Dataset:
             self.covariates = None
             self.num_covariates = None
 
-        self.num_genes = self.genes.shape[1]
-        self.num_perturbations = len(pert_unique)
+        self.num_outcomes = self.genes.shape[1]
+        self.num_treatments = len(pert_unique)
 
         self.cov_pert = np.array([
             f"{self.cov_names[i]}_"
@@ -245,8 +245,8 @@ class SubDataset:
         self.de_genes = dataset.de_genes
 
         self.num_covariates = dataset.num_covariates
-        self.num_genes = dataset.num_genes
-        self.num_perturbations = dataset.num_perturbations
+        self.num_outcomes = dataset.num_outcomes
+        self.num_treatments = dataset.num_treatments
 
         if self.sample_cf:
             self.cov_pert_dose_idx = unique_ind(self.cov_pert_dose)
@@ -301,7 +301,7 @@ def load_dataset_splits(
     )
 
     splits = {
-        "training": dataset.subset("train", "all"),
+        "train": dataset.subset("train", "all"),
         "test": dataset.subset("test", "all"),
         "ood": dataset.subset("ood", "all"),
     }
