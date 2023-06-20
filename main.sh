@@ -11,8 +11,8 @@ PYARGS="$PYARGS --data_path $DATA/datasets/marson_prepped.h5ad" #sciplex_prepped
 PYARGS="$PYARGS --artifact_path $DATA/artifact"
 PYARGS="$PYARGS --gpu 0" #PYARGS="$PYARGS --cpu"
 
-PYARGS="$PYARGS --outcome_dist normal"
 PYARGS="$PYARGS --dist_mode match"
+PYARGS="$PYARGS --dist_outcomes normal"
 
 PYARGS="$PYARGS --max_epochs 1000"
 PYARGS="$PYARGS --batch_size 64"

@@ -36,8 +36,8 @@ def load_VCI(args, state_dict=None):
         omega0=args["omega0"],
         omega1=args["omega1"],
         omega2=args["omega2"],
-        outcome_dist=args["outcome_dist"],
         dist_mode=args["dist_mode"],
+        dist_outcomes=args["dist_outcomes"],
         patience=args["patience"],
         device=device,
         hparams=args["hparams"]
@@ -63,18 +63,17 @@ class VCI(nn.Module):
         omega0=1.0,
         omega1=2.0,
         omega2=0.1,
-        mc_sample_size=30,
-        outcome_dist="normal",
         dist_mode="match",
+        dist_outcomes="normal",
+        type_treatments=None,
+        type_covariates=None,
+        mc_sample_size=30,
         best_score=-1e3,
         patience=5,
         device="cuda",
         hparams=""
     ):
         super(VCI, self).__init__()
-        # set hyperparameters
-        self._set_hparams_(hparams)
-
         # generic attributes
         self.num_outcomes = num_outcomes
         self.num_treatments = num_treatments
@@ -82,34 +81,34 @@ class VCI(nn.Module):
         self.embed_outcomes = embed_outcomes
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
-        self.outcome_dim = (
-            self.hparams["outcome_emb_dim"] if embed_outcomes else num_outcomes)
-        self.treatment_dim = (
-            self.hparams["treatment_emb_dim"] if embed_treatments else num_treatments)
-        self.covariate_dim = (
-            self.hparams["covariate_emb_dim"]*len(num_covariates) if embed_covariates else sum(num_covariates))
         # vci parameters
         self.omega0 = omega0
         self.omega1 = omega1
         self.omega2 = omega2
-        self.mc_sample_size = mc_sample_size
-        self.outcome_dist = outcome_dist
         self.dist_mode = dist_mode
         # early-stopping
         self.best_score = best_score
         self.patience = patience
         self.patience_trials = 0
         # distribution parameters
-        if self.outcome_dist == "nb":
+        self.mc_sample_size = mc_sample_size
+        self.dist_outcomes = dist_outcomes
+        if self.dist_outcomes == "nb":
             self.num_dist_params = 2
-        elif self.outcome_dist == "zinb":
+        elif self.dist_outcomes == "zinb":
             self.num_dist_params = 3
-        elif self.outcome_dist == "normal":
+        elif self.dist_outcomes == "normal":
             self.num_dist_params = 2
-        elif self.outcome_dist == "bernoulli":
+        elif self.dist_outcomes == "bernoulli":
             self.num_dist_params = 1
         else:
-            raise ValueError("outcome_dist not recognized")
+            raise ValueError("dist_outcomes not recognized")
+        self.type_treatments = "object" if type_treatments is None else type_treatments
+        self.type_covariates = (["object"] * len(num_covariates) 
+            if type_covariates is None else type_covariates)
+
+        # set hyperparameters
+        self._set_hparams_(hparams)
 
         # individual-specific model
         self._init_indiv_model()
@@ -156,6 +155,15 @@ class VCI(nn.Module):
                 self.hparams.update(dictionary)
             else:
                 self.hparams.update(hparams)
+    
+        self.outcome_dim = (
+            self.hparams["outcome_emb_dim"] if self.embed_outcomes else self.num_outcomes)
+        self.treatment_dim = (
+            self.hparams["treatment_emb_dim"] if self.embed_treatments else self.num_treatments)
+        self.covariate_dim = (
+            self.hparams["covariate_emb_dim"]*len(self.num_covariates) 
+            if self.embed_covariates else sum(self.num_covariates)
+        )
 
         return self.hparams
 
@@ -299,7 +307,7 @@ class VCI(nn.Module):
         if dim is None:
             dim = self.num_outcomes
         if dist is None:
-            dist = self.outcome_dist
+            dist = self.dist_outcomes
 
         if dist == "nb":
             mus = F.softplus(constructions[..., 0]).add(eps)
@@ -401,7 +409,7 @@ class VCI(nn.Module):
         Compute log likelihood.
         """
         if dist is None:
-            dist = self.outcome_dist
+            dist = self.dist_outcomes
 
         num = len(outcomes)
         if isinstance(outcomes, list):
@@ -642,31 +650,31 @@ class VCI(nn.Module):
 
     def init_covariates_emb(self):
         covariates_emb = []
-        for num_covariate in self.num_covariates:
-            if num_covariate == 1:
-                covariates_emb.append(MLP(
-                        [1, self.hparams["covariate_emb_dim"]], final_act="relu"
+        for num_cov, type_cov in zip(self.num_covariates, self.type_covariates):
+            if type_cov in ("object", "bool", "category"):
+                covariates_emb.append(nn.Embedding(
+                        num_cov, self.hparams["covariate_emb_dim"]
                     ))
             else:
-                covariates_emb.append(nn.Embedding(
-                        num_covariate, self.hparams["covariate_emb_dim"]
+                covariates_emb.append(MLP(
+                        [num_cov] + [self.hparams["covariate_emb_dim"]] * 2
                     ))
         return covariates_emb
-    
+
     def init_encoder(self):
         return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
             + [self.hparams["encoder_width"]] * (self.hparams["encoder_depth"] - 1)
             + [self.hparams["latent_dim"]],
             heads=2, final_act="relu"
         )
-    
+
     def init_decoder(self):
         return MLP([self.hparams["latent_dim"]+self.treatment_dim]
             + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
             + [self.num_outcomes],
             heads=self.num_dist_params
         )
-    
+
     def init_discriminator(self):
         return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
             + [self.hparams["discriminator_width"]] * (self.hparams["discriminator_depth"] - 1)
