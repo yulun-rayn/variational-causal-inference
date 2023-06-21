@@ -30,7 +30,10 @@ class CompoundEmbedding(nn.Module):
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         # input: batch_size x num_index
-        weight_rep = self.weight.repeat(input.shape[1],1,1)
+        weight = torch.cat([self.weight, 
+            torch.zeros((1, self.weight.shape[1]), device=self.weight.device)
+        ], dim=0) # allow -1 indexing
+        weight_rep = weight.repeat(input.shape[1], 1, 1)
         weight_gat = weight_rep[torch.arange(input.shape[1]), input]
         return weight_gat.sum(1)
 
