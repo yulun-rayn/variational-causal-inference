@@ -6,12 +6,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-from .module import MLP, Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
+from .module import (
+    CompoundEmbedding, MLP,
+    Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
+)
 
-from ..utils.model_utils import CompoundEmbedding
 from ..utils.math_utils import (
-    logprob_normal,
-    kldiv_normal,
+    logprob_normal, kldiv_normal,
     logprob_bernoulli_logits,
     logprob_nb_positive,
     logprob_zinb_positive
