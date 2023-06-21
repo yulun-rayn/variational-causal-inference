@@ -8,6 +8,7 @@ from torch.distributions import Normal
 
 from .module import MLP, Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
 
+from ..utils.model_utils import CompoundEmbedding
 from ..utils.math_utils import (
     logprob_normal,
     kldiv_normal,
@@ -81,6 +82,10 @@ class VCI(nn.Module):
         self.embed_outcomes = embed_outcomes
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
+        self.dist_outcomes = dist_outcomes
+        self.type_treatments = type_treatments
+        self.type_covariates = type_covariates
+        self.mc_sample_size = mc_sample_size
         # vci parameters
         self.omega0 = omega0
         self.omega1 = omega1
@@ -90,22 +95,6 @@ class VCI(nn.Module):
         self.best_score = best_score
         self.patience = patience
         self.patience_trials = 0
-        # distribution parameters
-        self.mc_sample_size = mc_sample_size
-        self.dist_outcomes = dist_outcomes
-        if self.dist_outcomes == "nb":
-            self.num_dist_params = 2
-        elif self.dist_outcomes == "zinb":
-            self.num_dist_params = 3
-        elif self.dist_outcomes == "normal":
-            self.num_dist_params = 2
-        elif self.dist_outcomes == "bernoulli":
-            self.num_dist_params = 1
-        else:
-            raise ValueError("dist_outcomes not recognized")
-        self.type_treatments = "object" if type_treatments is None else type_treatments
-        self.type_covariates = (["object"] * len(num_covariates) 
-            if type_covariates is None else type_covariates)
 
         # set hyperparameters
         self._set_hparams_(hparams)
@@ -155,7 +144,7 @@ class VCI(nn.Module):
                 self.hparams.update(dictionary)
             else:
                 self.hparams.update(hparams)
-    
+
         self.outcome_dim = (
             self.hparams["outcome_emb_dim"] if self.embed_outcomes else self.num_outcomes)
         self.treatment_dim = (
@@ -254,11 +243,10 @@ class VCI(nn.Module):
         if self.embed_outcomes:
             outcomes = self.outcomes_embeddings(outcomes)
         if self.embed_treatments:
-            treatments = self.treatments_embeddings(
-                treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
+            treatments = self.treatments_embeddings(treatments)
         if self.embed_covariates:
-            covariates = [emb(covars if covars.shape[-1] == 1 else covars.argmax(1)) 
-                for covars, emb in zip(covariates, self.covariates_embeddings)
+            covariates = [emb(covars) for covars, emb in 
+                zip(covariates, self.covariates_embeddings)
             ]
 
         inputs = torch.cat([outcomes, treatments] + covariates, -1)
@@ -270,8 +258,7 @@ class VCI(nn.Module):
 
     def decode(self, latents, treatments):
         if self.embed_treatments:
-            treatments = self.treatments_embeddings(
-                treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
+            treatments = self.treatments_embeddings(treatments)
 
         inputs = torch.cat([latents, treatments], -1)
 
@@ -281,11 +268,10 @@ class VCI(nn.Module):
         if self.embed_outcomes:
             outcomes = self.adv_outcomes_emb(outcomes)
         if self.embed_treatments:
-            treatments = self.adv_treatments_emb(
-                treatments if treatments.shape[-1] == 1 else treatments.argmax(1))
+            treatments = self.adv_treatments_emb(treatments)
         if self.embed_covariates:
-            covariates = [emb(covars if covars.shape[-1] == 1 else covars.argmax(1)) 
-                for covars, emb in zip(covariates, self.adv_covariates_emb)
+            covariates = [emb(covars) for covars, emb in 
+                zip(covariates, self.adv_covariates_emb)
             ]
 
         inputs = torch.cat([outcomes, treatments] + covariates, -1)
@@ -639,20 +625,24 @@ class VCI(nn.Module):
         )
 
     def init_treatment_emb(self):
-        if self.num_treatments == 1:
-            return MLP(
-                [1, self.hparams["treatment_emb_dim"]], final_act="relu"
+        if self.type_treatments in ("object", "bool", "category", None):
+            return CompoundEmbedding(
+                self.num_treatments, self.hparams["treatment_emb_dim"]
             )
         else:
-            return nn.Embedding(
-                self.num_treatments, self.hparams["treatment_emb_dim"]
+            return MLP(
+                [self.num_treatments] + [self.hparams["treatment_emb_dim"]] * 2
             )
 
     def init_covariates_emb(self):
+        type_covariates = self.type_covariates
+        if type_covariates is None or isinstance(type_covariates, str):
+            type_covariates = [type_covariates] * len(self.num_covariates)
+
         covariates_emb = []
-        for num_cov, type_cov in zip(self.num_covariates, self.type_covariates):
-            if type_cov in ("object", "bool", "category"):
-                covariates_emb.append(nn.Embedding(
+        for num_cov, type_cov in zip(self.num_covariates, type_covariates):
+            if type_cov in ("object", "bool", "category", None):
+                covariates_emb.append(CompoundEmbedding(
                         num_cov, self.hparams["covariate_emb_dim"]
                     ))
             else:
@@ -669,10 +659,21 @@ class VCI(nn.Module):
         )
 
     def init_decoder(self):
+        if self.dist_outcomes == "nb":
+            heads = 2
+        elif self.dist_outcomes == "zinb":
+            heads = 3
+        elif self.dist_outcomes == "normal":
+            heads = 2
+        elif self.dist_outcomes == "bernoulli":
+            heads = 1
+        else:
+            raise ValueError("dist_outcomes not recognized")
+
         return MLP([self.hparams["latent_dim"]+self.treatment_dim]
             + [self.hparams["decoder_width"]] * (self.hparams["decoder_depth"] - 1)
             + [self.num_outcomes],
-            heads=self.num_dist_params
+            heads=heads
         )
 
     def init_discriminator(self):

@@ -152,9 +152,9 @@ class Dataset:
                 names = np.unique(values)
                 self.num_covariates.append(len(names))
 
-                names_onehot = torch.eye(len(names))
+                names_idx = torch.arange(len(names)).unsqueeze(-1)
                 self.covars_dict[cov] = dict(
-                    zip(list(names), names_onehot)
+                    zip(list(names), names_idx)
                 )
 
                 self.covariates.append(
