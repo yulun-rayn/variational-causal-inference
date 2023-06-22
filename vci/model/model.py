@@ -170,9 +170,8 @@ class VCI(nn.Module):
             params.extend(list(self.treatments_embeddings.parameters()))
 
         if self.embed_covariates:
-            self.covariates_embeddings = nn.Sequential(*self.init_covariates_emb())
-            for emb in self.covariates_embeddings:
-                params.extend(list(emb.parameters()))
+            self.covariates_embeddings = self.init_covariates_emb()
+            params.extend(list(self.covariates_embeddings.parameters()))
 
         # models
         self.encoder = self.init_encoder()
@@ -210,9 +209,8 @@ class VCI(nn.Module):
                 params.extend(list(self.adv_treatments_emb.parameters()))
 
             if self.embed_covariates:
-                self.adv_covariates_emb = nn.Sequential(*self.init_covariates_emb())
-                for emb in self.adv_covariates_emb:
-                    params.extend(list(emb.parameters()))
+                self.adv_covariates_emb = self.init_covariates_emb()
+                params.extend(list(self.adv_covariates_emb.parameters()))
 
             # model
             self.discriminator = self.init_discriminator()
@@ -650,7 +648,7 @@ class VCI(nn.Module):
                 covariates_emb.append(MLP(
                         [num_cov] + [self.hparams["covariate_emb_dim"]] * 2
                     ))
-        return covariates_emb
+        return nn.ModuleList(covariates_emb)
 
     def init_encoder(self):
         return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
