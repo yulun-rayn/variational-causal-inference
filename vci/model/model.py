@@ -379,9 +379,7 @@ class VCI(nn.Module):
                 latents_constr, dim=self.hparams["latent_dim"], dist="normal"
             )
 
-            outcomes_constr_samp = self.sample(
-                latents_dist.mean, latents_dist.stddev, cf_treatments
-            )
+            outcomes_constr_samp = self.decode(latents_dist.sample(), cf_treatments)
             outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
 
         if return_dist:
@@ -544,7 +542,7 @@ class VCI(nn.Module):
             cf_latents_constr, dim=self.hparams["latent_dim"], dist="normal"
         )
 
-        return (outcomes_dist_samp, cf_outcomes_out,latents_dist, cf_latents_dist)
+        return (outcomes_dist_samp, cf_outcomes_out, latents_dist, cf_latents_dist)
 
     def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates):
         """
@@ -620,7 +618,7 @@ class VCI(nn.Module):
 
     def init_outcome_emb(self):
         return MLP(
-            [self.num_outcomes, self.hparams["outcome_emb_dim"]], final_act="relu"
+            [self.num_outcomes] + [self.hparams["outcome_emb_dim"]] * 2
         )
 
     def init_treatment_emb(self):
