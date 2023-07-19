@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from torch.distributions import Normal
 
 from .module import (
-    CompoundEmbedding, MLP,
     Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
 )
 
@@ -16,6 +15,9 @@ from ..utils.math_utils import (
     logprob_bernoulli_logits,
     logprob_nb_positive,
     logprob_zinb_positive
+)
+from ..utils.model_utils import (
+    MLP, SinusoidalEmbedding, CompoundEmbedding
 )
 
 #####################################################
@@ -623,13 +625,9 @@ class VCI(nn.Module):
 
     def init_treatment_emb(self):
         if self.type_treatments in ("object", "bool", "category", None):
-            return CompoundEmbedding(
-                self.num_treatments, self.hparams["treatment_emb_dim"]
-            )
+            return CompoundEmbedding(self.num_treatments, self.hparams["treatment_emb_dim"])
         else:
-            return MLP(
-                [self.num_treatments] + [self.hparams["treatment_emb_dim"]] * 2
-            )
+            return SinusoidalEmbedding(self.num_treatments, self.hparams["treatment_emb_dim"])
 
     def init_covariates_emb(self):
         type_covariates = self.type_covariates
@@ -639,13 +637,13 @@ class VCI(nn.Module):
         covariates_emb = []
         for num_cov, type_cov in zip(self.num_covariates, type_covariates):
             if type_cov in ("object", "bool", "category", None):
-                covariates_emb.append(CompoundEmbedding(
-                        num_cov, self.hparams["covariate_emb_dim"]
-                    ))
+                covariates_emb.append(
+                    CompoundEmbedding(num_cov, self.hparams["covariate_emb_dim"])
+                )
             else:
-                covariates_emb.append(MLP(
-                        [num_cov] + [self.hparams["covariate_emb_dim"]] * 2
-                    ))
+                covariates_emb.append(
+                    SinusoidalEmbedding(num_cov, self.hparams["covariate_emb_dim"])
+                )
         return nn.ModuleList(covariates_emb)
 
     def init_encoder(self):
