@@ -250,6 +250,11 @@ class SubDataset:
 
         if self.sample_cf:
             self.cov_pert_dose_idx = unique_ind(self.cov_pert_dose)
+        control_set = set(self.control_names)
+        pert_dose_set = set(self.pert_dose)
+        valid_pert_dose = pert_dose_set - control_set
+        self.valid_pert_dose_list = list(valid_pert_dose)
+        self.cf_indices = {pd: np.where(self.pert_dose == pd)[0][0] for pd in self.valid_pert_dose_list}
 
     def subset_condition(self, control=True):
         if control is None:
@@ -259,10 +264,15 @@ class SubDataset:
             return SubDataset(self, idx)
 
     def __getitem__(self, i):
-        cf_pert_dose_name = self.control_names[0]
-        while any(c in cf_pert_dose_name for c in self.control_names):
-            cf_i = np.random.choice(len(self.pert_dose))
-            cf_pert_dose_name = self.pert_dose[cf_i]
+        if not self.valid_pert_dose_list:
+            raise ValueError("There is no effective pert_dose to choose from.")
+        cf_pert_dose_name = np.random.choice(self.valid_pert_dose_list)
+        cf_i = self.cf_indices[cf_pert_dose_name]
+        
+        # cf_pert_dose_name = self.control_names[0]
+        # while any(c in cf_pert_dose_name for c in self.control_names):
+        #     cf_i = np.random.choice(len(self.pert_dose))
+        #     cf_pert_dose_name = self.pert_dose[cf_i]
 
         cf_genes = None
         if self.sample_cf:
