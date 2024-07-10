@@ -72,9 +72,12 @@ def evaluate_r2(model, dataset, dataset_control,
             # estimate metrics only for reasonably-sized perturbation/cell-type combos
             if len(idx) > min_samples:
                 cov_pert = dataset.cov_pert[idx[0]]
-                de_idx = np.where(
-                    dataset.var_names.isin(np.array(dataset.de_genes[cov_pert]))
-                )[0]
+                de_genes = np.array(dataset.de_genes.get(cov_pert, []))
+                de_idx = np.where(dataset.var_names.isin(de_genes))[0] if de_genes.size > 0 else np.array([])
+                
+                # de_idx = np.where(
+                #     dataset.var_names.isin(np.array(dataset.de_genes[cov_pert]))
+                # )[0]
 
                 perts = dataset.perturbations[idx[0]].view(1, -1).repeat(num, 1).clone()
 
@@ -99,13 +102,15 @@ def evaluate_r2(model, dataset, dataset_control,
 
                 yp_m = yp.mean(0)
                 mean_score_mean.append(r2_score(yt_m, yp_m))
-                mean_score_de_mean.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
+                if de_idx.size > 0:
+                    mean_score_de_mean.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
                 if pert_category in pert_names_control_cats:
                     pert_idx = pert_names_control_cats[pert_category]
 
                     yp_r = yp_m + (genes_control[pert_idx] - yp[pert_idx]).mean(0)
                     mean_score_robust.append(r2_score(yt_m, yp_r))
-                    mean_score_de_robust.append(r2_score(yt_m[de_idx], yp_r[de_idx]))
+                    if de_idx.size > 0:
+                        mean_score_de_robust.append(r2_score(yt_m[de_idx], yp_r[de_idx]))
 
     return [
         np.mean(s) if len(s) else -1
