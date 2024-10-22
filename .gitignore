@@ -5,11 +5,11 @@
 *.h5ad
 *.swp
 *.pem
-run*
 test_run*
 *.nfs*
 log/
 runs/
+data/
 saves/
 artifact/
 

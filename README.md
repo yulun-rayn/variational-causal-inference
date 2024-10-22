@@ -2,7 +2,7 @@
 
 This repository is the official implementation of [**Variational Causal Inference**](https://arxiv.org/abs/2209.05935).
 
-![](figure/elbo.png)
+![](figure/causal-diagram.png)
 
 
 ## Installation
@@ -10,8 +10,9 @@ This repository is the official implementation of [**Variational Causal Inferenc
 ### 1. Create Conda Environment
 ```bash
 conda config --append channels conda-forge
-conda create -n vci-env --file requirements.txt
+conda create -n vci-env python=3.9
 conda activate vci-env
+pip install -r requirements.txt
 ```
 
 ### 2. Install Learning Libraries
@@ -22,6 +23,7 @@ conda activate vci-env
 
 ## Data
 
+### Single-cell Perturbation Dataset
 Visit our [resource site](https://osf.io/5n2mz/), download the contents of `main/datasets` into [datasets](datasets). To see how to process your own dataset, download the contents of `data-prep/datasets` into [datasets](datasets) and follow the examples. A clean example of data preparation can be found in [SciplexPrep.ipynb](datasets/SciplexPrep.ipynb). For an example of data preparation on a messier dataset with thorough analysis and visualizations, see [MarsonPrep.ipynb](datasets/MarsonPrep.ipynb).
 
 In summary, the preparation procedure includes:
@@ -45,10 +47,18 @@ In summary, the preparation procedure includes:
 Once the environment is set up and the data are prepared, the function call to train the model is:
 
 ```bash
-./main.sh &
+./run-gene.sh &
 ```
 
-A list of flags may be found in `main.sh` and `main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
+```bash
+./run-celebA.sh &
+```
+
+```bash
+./run-morphoMNIST.sh &
+```
+
+A list of flags may be found in these run files and `main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
 
 
 ## License

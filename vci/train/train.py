@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+from tqdm import tqdm
 from datetime import datetime
 from collections import defaultdict
 
@@ -9,93 +10,63 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from ..evaluate.evaluate import evaluate, evaluate_classic
+from .prepare import prepare, prepare_classifier
 
-from ..model.model import load_VCI
-
-from ..dataset.dataset import load_dataset_splits
-
+from ..evaluate.evaluate import evaluate, evaluate_loss
 from ..utils.general_utils import initialize_logger, ljson
-from ..utils.data_utils import data_collate
+from ..utils.data_utils import move_tensors
 
-def prepare(args, state_dict=None):
-    """
-    Instantiates model and dataset to run an experiment.
-    """
-
-    # dataset
-    datasets = load_dataset_splits(
-        args["data_path"],
-        sample_cf=(True if args["dist_mode"] == "match" else False),
-    )
-
-    datasets.update(
-        {
-            "loader_tr": torch.utils.data.DataLoader(
-                datasets["train"],
-                batch_size=args["batch_size"],
-                shuffle=True,
-                collate_fn=(lambda batch: data_collate(batch, nb_dims=1))
-            )
-        }
-    )
-
-    args["num_outcomes"] = datasets["train"].num_outcomes
-    args["num_treatments"] = datasets["train"].num_treatments
-    args["num_covariates"] = datasets["train"].num_covariates
-
-    # model
-    model = load_VCI(args, state_dict)
-
-    args["hparams"] = model.hparams
-
-    return model, datasets
-
-def train(args, prepare=prepare):
+def train(args, prepare=prepare, evaluate=evaluate):
     """
     Trains a VCI model
     """
+    state_dict = None
+    if args["checkpoint"] is not None:
+        state_dict, args = torch.load(args["checkpoint"], map_location="cpu")
+
+    device = (
+        "cuda:" + str(args["gpu"])
+            if (not args["cpu"]) 
+                and torch.cuda.is_available() 
+            else 
+        "cpu"
+    )
+
     if args["seed"] is not None:
         np.random.seed(args["seed"])
         torch.manual_seed(args["seed"])
 
-    model, datasets = prepare(args)
+    model, datasets = prepare(args, state_dict=state_dict, device=device)
 
     dt = datetime.now().strftime("%Y.%m.%d_%H:%M:%S")
-    writer = SummaryWriter(log_dir=os.path.join(args["artifact_path"], "runs/" + args["name"] + "_" + dt))
+
+    log_dir = os.path.join(args["artifact_path"], "runs/" + args["name"] + "_" + dt)
+    writer = SummaryWriter(log_dir=log_dir)
+    initialize_logger(log_dir)
+
     save_dir = os.path.join(args["artifact_path"], "saves/" + args["name"] + "_" + dt)
     os.makedirs(save_dir, exist_ok=True)
 
-    initialize_logger(save_dir)
     ljson({"training_args": args})
     ljson({"model_params": model.hparams})
     logging.info("")
-
     start_time = time.time()
     for epoch in range(args["max_epochs"]):
         epoch_training_stats = defaultdict(float)
 
-        for data in datasets["loader_tr"]:
-            (genes, perts, cf_genes, cf_perts, covariates) = (
-            data[0], data[1], data[2], data[3], data[4:])
-
+        for batch_idx, batch in enumerate(datasets["train_loader"]):
             minibatch_training_stats = model.update(
-                genes, perts, cf_genes, cf_perts, covariates
+                move_tensors(*batch, device=device), batch_idx, writer
             )
 
             for key, val in minibatch_training_stats.items():
                 epoch_training_stats[key] += val
-        model.update_eval_encoder()
-
-        for key, val in epoch_training_stats.items():
-            epoch_training_stats[key] = val / len(datasets["loader_tr"])
-            if not (key in model.history.keys()):
-                model.history[key] = []
-            model.history[key].append(epoch_training_stats[key])
-        model.history["epoch"].append(epoch)
+        model.step()
 
         ellapsed_minutes = (time.time() - start_time) / 60
-        model.history["elapsed_time_min"] = ellapsed_minutes
+
+        for key, val in epoch_training_stats.items():
+            epoch_training_stats[key] = val / len(datasets["train_loader"])
 
         # decay learning rate if necessary
         # also check stopping condition: 
@@ -103,18 +74,9 @@ def train(args, prepare=prepare):
         stop = (epoch == args["max_epochs"] - 1)
 
         if (epoch % args["checkpoint_freq"]) == 0 or stop:
-            if args["eval_mode"] == "native":
-                evaluation_stats = evaluate(model, datasets)
-            elif args["eval_mode"] == "classic":
-                evaluation_stats = evaluate_classic(model, datasets)
-            else:
-                raise ValueError("eval_mode not recognized")
-
-            for key, val in evaluation_stats.items():
-                if not (key in model.history.keys()):
-                    model.history[key] = []
-                model.history[key].append(val)
-            model.history["stats_epoch"].append(epoch)
+            evaluation_stats, early_stop = evaluate(model, datasets,
+                epoch=epoch, save_dir=save_dir, **args
+            )
 
             ljson(
                 {
@@ -124,18 +86,16 @@ def train(args, prepare=prepare):
                     "ellapsed_minutes": ellapsed_minutes,
                 }
             )
-
             for key, val in epoch_training_stats.items():
                 writer.add_scalar(key, val, epoch)
 
             torch.save(
-                (model.state_dict(), args, model.history),
+                (model.state_dict(), args),
                 os.path.join(
                     save_dir,
                     "model_seed={}_epoch={}.pt".format(args["seed"], epoch),
                 ),
             )
-
             ljson(
                 {
                     "model_saved": "model_seed={}_epoch={}.pt\n".format(
@@ -143,10 +103,16 @@ def train(args, prepare=prepare):
                     )
                 }
             )
-            stop = stop or model.early_stopping(np.mean(evaluation_stats["test"]))
+
             if stop:
+                ljson({"stop": epoch})
+                break
+            if early_stop:
                 ljson({"early_stop": epoch})
                 break
 
     writer.close()
     return model
+
+def train_classifier(args, prepare=prepare_classifier, evaluate=evaluate_loss):
+    return train(args, prepare=prepare, evaluate=evaluate)

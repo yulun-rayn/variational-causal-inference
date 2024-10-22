@@ -1,12 +1,16 @@
 
 import re
+import math
 import collections
 
 import numpy as np
 import pandas as pd
-import scanpy as sc
+
+from sklearn import preprocessing
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
@@ -64,6 +68,9 @@ def data_collate(batch, nb_dims=1):
     if elem is None:
         return list(batch)
     if isinstance(elem, torch.Tensor):
+        if elem.dim() > nb_dims:
+            return list(batch)
+
         out = None
         if torch.utils.data.get_worker_info() is not None:
             # If we're in a background process, concatenate directly into a
@@ -71,10 +78,7 @@ def data_collate(batch, nb_dims=1):
             numel = sum(x.numel() for x in batch)
             storage = elem.storage()._new_shared(numel)
             out = elem.new(storage).resize_(len(batch), *list(elem.size()))
-        if elem.dim() > nb_dims:
-            return list(batch)
-        else:
-            return torch.stack(batch, 0, out=out)
+        return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
         if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':
@@ -118,204 +122,103 @@ def data_collate(batch, nb_dims=1):
 
     raise TypeError(data_collate_err_msg_format.format(elem_type))
 
-
-def rank_genes_groups_by_cov(
-    adata,
-    groupby,
-    control_group,
-    covariate,
-    pool_doses=False,
-    n_genes=50,
-    rankby_abs=True,
-    key_added="rank_genes_groups_cov",
-    return_dict=False,
-):
-
+def move_tensor(tensor, device):
     """
-    Function that generates a list of differentially expressed genes computed
-    separately for each covariate category, and using the respective control
-    cells as reference.
-
-    Usage example:
-
-    rank_genes_groups_by_cov(
-        adata,
-        groupby='cov_product_dose',
-        covariate_key='cell_type',
-        control_group='Vehicle_0'
-    )
-
-    Parameters
-    ----------
-    adata : AnnData
-        AnnData dataset
-    groupby : str
-        Obs column that defines the groups, should be
-        cartesian product of covariate_perturbation_cont_var,
-        it is important that this format is followed.
-    control_group : str
-        String that defines the control group in the groupby obs
-    covariate : str
-        Obs column that defines the main covariate by which we
-        want to separate DEG computation (eg. cell type, species, etc.)
-    n_genes : int (default: 50)
-        Number of DEGs to include in the lists
-    rankby_abs : bool (default: True)
-        If True, rank genes by absolute values of the score, thus including
-        top downregulated genes in the top N genes. If False, the ranking will
-        have only upregulated genes at the top.
-    key_added : str (default: 'rank_genes_groups_cov')
-        Key used when adding the dictionary to adata.uns
-    return_dict : str (default: False)
-        Signals whether to return the dictionary or not
-
-    Returns
-    -------
-    Adds the DEG dictionary to adata.uns
-
-    If return_dict is True returns:
-    gene_dict : dict
-        Dictionary where groups are stored as keys, and the list of DEGs
-        are the corresponding values
-
+    Move minibatch tensor to CPU/GPU.
     """
+    if isinstance(tensor, list):
+        return [move_tensor(t, device) if t is not None else None for t in tensor]
+    else:
+        return tensor.to(device)
 
-    gene_dict = {}
-    cov_categories = adata.obs[covariate].unique()
-    for cov_cat in cov_categories:
-        print(cov_cat)
-        # name of the control group in the groupby obs column
-        control_group_cov = "_".join([cov_cat, control_group])
-
-        # subset adata to cells belonging to a covariate category
-        adata_cov = adata[adata.obs[covariate] == cov_cat]
-
-        # compute DEGs
-        sc.tl.rank_genes_groups(
-            adata_cov,
-            groupby=groupby,
-            reference=control_group_cov,
-            rankby_abs=rankby_abs,
-            n_genes=n_genes,
-        )
-
-        # add entries to dictionary of gene sets
-        de_genes = pd.DataFrame(adata_cov.uns["rank_genes_groups"]["names"])
-        for group in de_genes:
-            gene_dict[group] = de_genes[group].tolist()
-
-    adata.uns[key_added] = gene_dict
-
-    if return_dict:
-        return gene_dict
-
-def rank_genes_groups(
-    adata,
-    groupby,
-    reference,
-    control_key,
-    pool_doses=False,
-    n_genes=50,
-    rankby_abs=True,
-    key_added="rank_genes_groups_cov",
-    return_dict=False,
-):
-
+def move_tensors(*tensors, device):
     """
-    Function that generates a list of differentially expressed genes computed
-    separately for each covariate category, and using the respective control
-    cells as reference.
-
-    Usage example:
-
-    rank_genes_groups_by_cov(
-        adata,
-        groupby='cov_product_dose',
-        covariate_key='cell_type',
-        control_group='Vehicle_0'
-    )
-
-    Parameters
-    ----------
-    adata : AnnData
-        AnnData dataset
-    groupby : str
-        Obs column that defines the groups, should be
-        cartesian product of covariate_perturbation_cont_var,
-        it is important that this format is followed.
-    control_group : str
-        String that defines the control group in the groupby obs
-    covariate : str
-        Obs column that defines the main covariate by which we
-        want to separate DEG computation (eg. cell type, species, etc.)
-    n_genes : int (default: 50)
-        Number of DEGs to include in the lists
-    rankby_abs : bool (default: True)
-        If True, rank genes by absolute values of the score, thus including
-        top downregulated genes in the top N genes. If False, the ranking will
-        have only upregulated genes at the top.
-    key_added : str (default: 'rank_genes_groups_cov')
-        Key used when adding the dictionary to adata.uns
-    return_dict : str (default: False)
-        Signals whether to return the dictionary or not
-
-    Returns
-    -------
-    Adds the DEG dictionary to adata.uns
-
-    If return_dict is True returns:
-    gene_dict : dict
-        Dictionary where groups are stored as keys, and the list of DEGs
-        are the corresponding values
-
+    Move minibatch tensors to CPU/GPU.
     """
+    return [move_tensor(tensor, device) if tensor is not None else None for tensor in tensors]
 
-    gene_dict = {}
-    for cov_cat in np.unique(adata.obs[reference].values):
-        adata_cov = adata[adata.obs[reference] == cov_cat]
-        control_group_cov = (
-            adata_cov[adata_cov.obs[control_key] == 1].obs[groupby].values[0]
-        )
+def concat_tensors(features):
+    f = []
+    for feature in features:
+        if isinstance(feature, list) or isinstance(feature, tuple):
+            f = f + [*feature]
+        else:
+            f = f + [feature]
+    return torch.cat(f, dim=-1)
 
-        # compute DEGs
-        sc.tl.rank_genes_groups(
-            adata_cov,
-            groupby=groupby,
-            reference=control_group_cov,
-            rankby_abs=rankby_abs,
-            n_genes=n_genes,
-            method='t-test' # TODO(Y): remove this for future version of scanpy
-        )
 
-        # add entries to dictionary of gene sets
-        de_genes = pd.DataFrame(adata_cov.uns["rank_genes_groups"]["names"])
-        for group in de_genes:
-            gene_dict[group] = de_genes[group].tolist()
+class SinusoidalEncoder(nn.Module):
+    def __init__(self, data=None, dim=None, max_period=10000, dim_scale=0.25):
+        super().__init__()
+        assert data is not None or dim is not None
 
-    adata.uns[key_added] = gene_dict
+        if dim is None:
+            dim = int(len(data)**dim_scale)
 
-    if return_dict:
-        return gene_dict
+        half = dim // 2
+        self.freqs = nn.Parameter(
+            torch.exp(-math.log(max_period) * 
+                torch.arange(start=0, end=half, dtype=torch.float) / half
+            ), requires_grad=False)
 
-def ranks_to_df(data, key="rank_genes_groups"):
-    """Converts an `sc.tl.rank_genes_groups` result into a MultiIndex dataframe.
+        self.res = dim % 2
 
-    You can access various levels of the MultiIndex with `df.loc[[category]]`.
+    def forward(self, timesteps):
+        if not isinstance(timesteps, torch.Tensor):
+            timesteps = torch.FloatTensor(timesteps)
+        timesteps = timesteps.to(self.freqs.device)
 
-    Params
-    ------
-    data : `AnnData`
-    key : str (default: 'rank_genes_groups')
-        Field in `.uns` of data where `sc.tl.rank_genes_groups` result is
-        stored.
-    """
-    d = data.uns[key]
-    dfs = []
-    for k in d.keys():
-        if k == "params":
-            continue
-        series = pd.DataFrame.from_records(d[k]).unstack()
-        series.name = k
-        dfs.append(series)
+        args = (timesteps[..., None] * self.freqs)
+        embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+        return torch.cat([embedding, torch.zeros_like(embedding[..., :self.res])], dim=-1)
 
-    return pd.concat(dfs, axis=1)
+
+class OneHotEncoder(nn.Module):
+    def __init__(self, data=None, dim=None):
+        super().__init__()
+        assert data is not None or dim is not None
+
+        self.transform = None
+        if data is not None:
+            self.transform = preprocessing.LabelEncoder().fit(data)
+        if dim is None:
+            dim = len(np.unique(self.transform.transform(data)))
+
+        self.eye = nn.Parameter(torch.eye(dim), requires_grad=False)
+
+    def forward(self, labels):
+        if self.transform:
+            labels = self.transform.transform(labels)
+
+        return self.eye[labels]
+
+
+class AttrEncoder(nn.Module):
+    def __init__(self, data: np.ndarray,
+                 discrete_dim: int = None, continuous_dim: int = None):
+        super().__init__()
+
+        encoder = []
+        sample = data[0].tolist()
+        for i, s in enumerate(sample):
+            if type(s) in (bool, str):
+                encoder.append(OneHotEncoder(
+                    data=data[:, i], dim=discrete_dim))
+            else:
+                encoder.append(SinusoidalEncoder(
+                    data=data[:, i], dim=continuous_dim))
+
+        self.encoder = nn.Sequential(*encoder)
+
+    def forward(self, data):
+        if data.ndim < 2:
+            out = data[None, :]
+        else:
+            out = data
+
+        out = [enc(np.array(out[:, i].tolist())) for i, enc in enumerate(self.encoder)]
+
+        out = torch.cat(out, dim=-1)
+        if out.ndim > data.ndim:
+            out = out.squeeze(-2)
+        return out

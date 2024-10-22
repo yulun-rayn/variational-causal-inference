@@ -1,14 +1,17 @@
 import copy
 import json
+import math
+
+import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-from .module import (
-    Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
-)
+from .classifier import Classifier, ClassifierConv
+from .distribution import Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
+from .module import MLP
 
 from ..utils.math_utils import (
     logprob_normal, kldiv_normal,
@@ -16,36 +19,77 @@ from ..utils.math_utils import (
     logprob_nb_positive,
     logprob_zinb_positive
 )
-from ..utils.model_utils import (
-    MLP, SinusoidalEmbedding, CompoundEmbedding
-)
+from ..utils.model_utils import get_lr_lambda, total_grad_norm_
 
 #####################################################
 #                     LOAD MODEL                    #
 #####################################################
 
-def load_VCI(args, state_dict=None):
-    device = (
-        "cuda:" + str(args["gpu"])
-            if (not args["cpu"]) 
-                and torch.cuda.is_available() 
-            else 
-        "cpu"
-    )
+def load_VCI(args, state_dict=None, device="cuda"):
+    if args["checkpoint_classifier"] is not None:
+        state_dict_classifier, args_classifier = torch.load(
+            args["checkpoint_classifier"], map_location="cpu")
 
-    model = VCI(
-        args["num_outcomes"],
-        args["num_treatments"],
-        args["num_covariates"],
-        omega0=args["omega0"],
-        omega1=args["omega1"],
-        omega2=args["omega2"],
-        dist_mode=args["dist_mode"],
-        dist_outcomes=args["dist_outcomes"],
-        patience=args["patience"],
-        device=device,
-        hparams=args["hparams"]
-    )
+    classifier = None
+    if args["data_name"] == "gene":
+        if args["dist_mode"] == "classify":
+            classifier = Classifier(
+                args_classifier["num_outcomes"],
+                args_classifier["num_treatments"],
+                args_classifier["num_covariates"],
+                hparams=args_classifier["hparams"]
+            )
+            classifier.load_state_dict(state_dict_classifier)
+            classifier.eval()
+
+        model = VCI(
+            args["num_outcomes"],
+            args["num_treatments"],
+            args["num_covariates"],
+            embed_outcomes=True,
+            embed_treatments=False,
+            embed_covariates=True,
+            omega0=args["omega0"],
+            omega1=args["omega1"],
+            omega2=args["omega2"],
+            dist_outcomes=args["dist_outcomes"],
+            dist_mode=args["dist_mode"],
+            classifier=classifier,
+            mc_sample_size=30,
+            device=device,
+            hparams=args["hparams"]
+        )
+    elif args["data_name"] in ("celebA", "morphoMNIST"):
+        if args["dist_mode"] == "classify":
+            classifier = ClassifierConv(
+                args_classifier["num_outcomes"],
+                args_classifier["num_treatments"],
+                args_classifier["num_covariates"],
+                hparams=args_classifier["hparams"]
+            )
+            classifier.load_state_dict(state_dict_classifier)
+            classifier.eval()
+
+        model = HVCIConv(
+            args["num_outcomes"],
+            args["num_treatments"],
+            args["num_covariates"],
+            embed_outcomes=True,
+            embed_treatments=True,
+            embed_covariates=False,
+            omega0=args["omega0"],
+            omega1=args["omega1"],
+            omega2=args["omega2"],
+            dist_outcomes=args["dist_outcomes"],
+            dist_mode=args["dist_mode"],
+            classifier=classifier,
+            mc_sample_size=3,
+            device=device,
+            hparams=args["hparams"]
+        )
+    else:
+        raise ValueError("data_name not recognized")
+
     if state_dict is not None:
         model.load_state_dict(state_dict)
 
@@ -62,22 +106,19 @@ class VCI(nn.Module):
         num_treatments,
         num_covariates,
         embed_outcomes=True,
-        embed_treatments=False,
+        embed_treatments=True,
         embed_covariates=True,
         omega0=1.0,
         omega1=2.0,
         omega2=0.1,
-        dist_mode="match",
         dist_outcomes="normal",
-        type_treatments=None,
-        type_covariates=None,
+        dist_mode="match",
+        classifier=None,
         mc_sample_size=30,
-        best_score=-1e3,
-        patience=5,
         device="cuda",
         hparams=""
     ):
-        super(VCI, self).__init__()
+        super().__init__()
         # generic attributes
         self.num_outcomes = num_outcomes
         self.num_treatments = num_treatments
@@ -86,21 +127,19 @@ class VCI(nn.Module):
         self.embed_treatments = embed_treatments
         self.embed_covariates = embed_covariates
         self.dist_outcomes = dist_outcomes
-        self.type_treatments = type_treatments
-        self.type_covariates = type_covariates
         self.mc_sample_size = mc_sample_size
         # vci parameters
         self.omega0 = omega0
         self.omega1 = omega1
         self.omega2 = omega2
         self.dist_mode = dist_mode
+        self.classifier = classifier
         # early-stopping
-        self.best_score = best_score
-        self.patience = patience
+        self.best_score = -np.inf
         self.patience_trials = 0
 
         # set hyperparameters
-        self._set_hparams_(hparams)
+        self._set_hparams(hparams)
 
         # individual-specific model
         self._init_indiv_model()
@@ -110,37 +149,39 @@ class VCI(nn.Module):
 
         self.iteration = 0
 
-        self.history = {"epoch": [], "stats_epoch": []}
-
         self.to_device(device)
 
-    def _set_hparams_(self, hparams):
+    def _set_hparams(self, hparams):
         """
         Set hyper-parameters to default values or values fixed by user for those
         hyper-parameters specified in the JSON string `hparams`.
         """
 
         self.hparams = {
-            "latent_dim": 128,
             "outcome_emb_dim": 256,
             "treatment_emb_dim": 64,
             "covariate_emb_dim": 16,
+            "latent_dim": 128,
             "encoder_width": 128,
             "encoder_depth": 3,
             "decoder_width": 128,
             "decoder_depth": 3,
             "discriminator_width": 64,
-            "discriminator_depth": 2,
-            "autoencoder_lr": 3e-4,
+            "discriminator_depth": 3,
+            "generator_lr": 3e-4,
+            "generator_wd": 4e-7,
+            "generator_ss": 300000,
             "discriminator_lr": 3e-4,
-            "autoencoder_wd": 4e-7,
             "discriminator_wd": 4e-7,
-            "discriminator_steps": 3,
-            "step_size_lr": 45,
+            "discriminator_ss": 300000,
+            "discriminator_freq": 2,
+            "max_grad_norm": -1,
+            "grad_skip_threshold": -1,
+            "patience": 20,
         }
 
         # the user may fix some hparams
-        if hparams != "":
+        if hparams is not None:
             if isinstance(hparams, str):
                 with open(hparams) as f:
                     dictionary = json.load(f)
@@ -153,131 +194,109 @@ class VCI(nn.Module):
         self.treatment_dim = (
             self.hparams["treatment_emb_dim"] if self.embed_treatments else self.num_treatments)
         self.covariate_dim = (
-            self.hparams["covariate_emb_dim"]*len(self.num_covariates) 
+            self.hparams["covariate_emb_dim"] * len(self.num_covariates) 
             if self.embed_covariates else sum(self.num_covariates)
         )
 
         return self.hparams
 
     def _init_indiv_model(self):
-        params = []
-
         # embeddings
-        if self.embed_outcomes:
-            self.outcomes_embeddings = self.init_outcome_emb()
-            params.extend(list(self.outcomes_embeddings.parameters()))
-
-        if self.embed_treatments:
-            self.treatments_embeddings = self.init_treatment_emb()
-            params.extend(list(self.treatments_embeddings.parameters()))
-
-        if self.embed_covariates:
-            self.covariates_embeddings = self.init_covariates_emb()
-            params.extend(list(self.covariates_embeddings.parameters()))
+        outcomes_embeddings = self.init_outcome_emb()
+        treatments_embeddings = self.init_treatment_emb()
+        covariates_embeddings = self.init_covariates_emb()
 
         # models
-        self.encoder = self.init_encoder()
-        params.extend(list(self.encoder.parameters()))
+        encoder = self.init_encoder()
+        decoder = self.init_decoder()
 
-        self.encoder_eval = copy.deepcopy(self.encoder)
-
-        self.decoder = self.init_decoder()
-        params.extend(list(self.decoder.parameters()))
+        self.generator = nn.ModuleDict({
+            "outcomes_embeddings": outcomes_embeddings,
+            "treatments_embeddings": treatments_embeddings,
+            "covariates_embeddings": covariates_embeddings,
+            "encoder": encoder,
+            "decoder": decoder
+        })
+        self.encoder_eval = copy.deepcopy(encoder)
 
         # optimizer
-        self.optimizer_autoencoder = torch.optim.Adam(
-            params,
-            lr=self.hparams["autoencoder_lr"],
-            weight_decay=self.hparams["autoencoder_wd"],
+        self.g_opt = torch.optim.Adam(
+            self.generator.parameters(),
+            lr=self.hparams["generator_lr"],
+            weight_decay=self.hparams["generator_wd"],
         )
-        self.scheduler_autoencoder = torch.optim.lr_scheduler.StepLR(
-            self.optimizer_autoencoder, step_size=self.hparams["step_size_lr"]
+        self.g_sch = torch.optim.lr_scheduler.LambdaLR(
+            self.g_opt, lr_lambda=get_lr_lambda(self.hparams["generator_ss"])
         )
-
-        return self.encoder, self.decoder
 
     def _init_covar_model(self):
-
-        if self.dist_mode == "discriminate":
-            params = []
-
+        if self.dist_mode == "classify":
+            assert self.classifier is not None
+        elif self.dist_mode == "discriminate":
             # embeddings
-            if self.embed_outcomes:
-                self.adv_outcomes_emb = self.init_outcome_emb()
-                params.extend(list(self.adv_outcomes_emb.parameters()))
-
-            if self.embed_treatments:
-                self.adv_treatments_emb = self.init_treatment_emb()
-                params.extend(list(self.adv_treatments_emb.parameters()))
-
-            if self.embed_covariates:
-                self.adv_covariates_emb = self.init_covariates_emb()
-                params.extend(list(self.adv_covariates_emb.parameters()))
+            outcomes_embeddings = self.init_outcome_emb()
+            treatments_embeddings = self.init_treatment_emb()
+            covariates_embeddings = self.init_covariates_emb()
 
             # model
-            self.discriminator = self.init_discriminator()
-            self.loss_discriminator = nn.BCEWithLogitsLoss()
-            params.extend(list(self.discriminator.parameters()))
+            discriminator = self.init_discriminator()
 
-            self.optimizer_discriminator = torch.optim.Adam(
-                params,
+            self.discriminator = nn.ModuleDict({
+                "outcomes_embeddings": outcomes_embeddings,
+                "treatments_embeddings": treatments_embeddings,
+                "covariates_embeddings": covariates_embeddings,
+                "discriminator": discriminator
+            })
+
+            # optimizer
+            self.d_opt = torch.optim.Adam(
+                self.discriminator.parameters(),
                 lr=self.hparams["discriminator_lr"],
                 weight_decay=self.hparams["discriminator_wd"],
             )
-            self.scheduler_discriminator = torch.optim.lr_scheduler.StepLR(
-                self.optimizer_discriminator, step_size=self.hparams["step_size_lr"]
+            self.d_sch = torch.optim.lr_scheduler.LambdaLR(
+                self.d_opt, lr_lambda=get_lr_lambda(self.hparams["discriminator_ss"])
             )
-
-            return self.discriminator
-
-        elif self.dist_mode == "fit":
-            raise NotImplementedError(
-                'TODO: implement dist_mode "fit" for distribution loss')
-
         elif self.dist_mode == "match":
-            return None
-
+            pass
         else:
             raise ValueError("dist_mode not recognized")
 
-    def encode(self, outcomes, treatments, covariates, eval=False):
-        if self.embed_outcomes:
-            outcomes = self.outcomes_embeddings(outcomes)
-        if self.embed_treatments:
-            treatments = self.treatments_embeddings(treatments)
-        if self.embed_covariates:
-            covariates = [emb(covars) for covars, emb in 
-                zip(covariates, self.covariates_embeddings)
-            ]
+    def encode(self, outcomes, treatments, covariates,
+               distributionize=True, dist="normal", evaluate=False):
+        outcomes = self.generator["outcomes_embeddings"](outcomes)
+        treatments = self.generator["treatments_embeddings"](treatments)
+        covariates = [emb(covars) for covars, emb in 
+            zip(covariates, self.generator["covariates_embeddings"])
+        ]
 
-        inputs = torch.cat([outcomes, treatments] + covariates, -1)
-
-        if eval:
-            return self.encoder_eval(inputs)
+        if evaluate:
+            out = self.encoder_eval(outcomes, treatments, covariates)
         else:
-            return self.encoder(inputs)
+            out = self.generator["encoder"](outcomes, treatments, covariates)
 
-    def decode(self, latents, treatments):
-        if self.embed_treatments:
-            treatments = self.treatments_embeddings(treatments)
+        if distributionize:
+            return self.distributionize(out, dist=dist)
+        return out
 
-        inputs = torch.cat([latents, treatments], -1)
+    def decode(self, latents, treatments,
+               distributionize=True, dist=None):
+        treatments = self.generator["treatments_embeddings"](treatments)
 
-        return self.decoder(inputs)
+        out = self.generator["decoder"](latents, treatments)
+
+        if distributionize:
+            return self.distributionize(out, dist=dist)
+        return out
 
     def discriminate(self, outcomes, treatments, covariates):
-        if self.embed_outcomes:
-            outcomes = self.adv_outcomes_emb(outcomes)
-        if self.embed_treatments:
-            treatments = self.adv_treatments_emb(treatments)
-        if self.embed_covariates:
-            covariates = [emb(covars) for covars, emb in 
-                zip(covariates, self.adv_covariates_emb)
-            ]
+        outcomes = self.discriminator["outcomes_embeddings"](outcomes)
+        treatments = self.discriminator["treatments_embeddings"](treatments)
+        covariates = [emb(covars) for covars, emb in 
+            zip(covariates, self.discriminator["covariates_embeddings"])
+        ]
 
-        inputs = torch.cat([outcomes, treatments] + covariates, -1)
-
-        return self.discriminator(inputs).squeeze()
+        return self.discriminator["discriminator"](outcomes, treatments, covariates).squeeze()
 
     def reparameterize(self, mu: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
         """
@@ -290,9 +309,7 @@ class VCI(nn.Module):
         eps = torch.randn_like(sigma)
         return eps * sigma + mu
 
-    def distributionize(self, constructions, dim=None, dist=None, eps=1e-3):
-        if dim is None:
-            dim = self.num_outcomes
+    def distributionize(self, constructions, dist=None, eps=1e-3):
         if dist is None:
             dist = self.dist_outcomes
 
@@ -324,37 +341,30 @@ class VCI(nn.Module):
         return dist
 
     def sample(self, mu: torch.Tensor, sigma: torch.Tensor, treatments: torch.Tensor, 
-            size=1) -> torch.Tensor:
-        mu = mu.repeat(size, 1)
-        sigma = sigma.repeat(size, 1)
-        treatments = treatments.repeat(size, 1)
+            size: int = 1, distributionize: bool = True, dist: str = None) -> torch.Tensor:
+        mu = mu.repeat(size, *[1]*(mu.ndim-1))
+        sigma = sigma.repeat(size, *[1]*(sigma.ndim-1))
+        treatments = treatments.repeat(size, *[1]*(treatments.ndim-1))
 
         latents = self.reparameterize(mu, sigma)
 
-        return self.decode(latents, treatments)
+        return self.decode(latents, treatments, distributionize=distributionize, dist=dist)
 
     def predict(
         self,
         outcomes,
         treatments,
-        cf_treatments,
         covariates,
+        cf_treatments,
         return_dist=False
     ):
-        outcomes, treatments, cf_treatments, covariates = self.move_inputs(
-            outcomes, treatments, cf_treatments, covariates
-        )
         if cf_treatments is None:
             cf_treatments = treatments
 
         with torch.autograd.no_grad():
-            latents_constr = self.encode(outcomes, treatments, covariates)
-            latents_dist = self.distributionize(
-                latents_constr, dim=self.hparams["latent_dim"], dist="normal"
-            )
+            latents_dist = self.encode(outcomes, treatments, covariates)
 
-            outcomes_constr = self.decode(latents_dist.mean, cf_treatments)
-            outcomes_dist = self.distributionize(outcomes_constr)
+            outcomes_dist = self.decode(latents_dist.mean, cf_treatments)
 
         if return_dist:
             return outcomes_dist
@@ -365,24 +375,17 @@ class VCI(nn.Module):
         self,
         outcomes,
         treatments,
-        cf_treatments,
         covariates,
+        cf_treatments,
         return_dist=False
     ):
-        outcomes, treatments, cf_treatments, covariates = self.move_inputs(
-            outcomes, treatments, cf_treatments, covariates
-        )
         if cf_treatments is None:
             cf_treatments = treatments
 
         with torch.autograd.no_grad():
-            latents_constr = self.encode(outcomes, treatments, covariates)
-            latents_dist = self.distributionize(
-                latents_constr, dim=self.hparams["latent_dim"], dist="normal"
-            )
+            latents_dist = self.encode(outcomes, treatments, covariates)
 
-            outcomes_constr_samp = self.decode(latents_dist.sample(), cf_treatments)
-            outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
+            outcomes_dist_samp = self.decode(latents_dist.sample(), cf_treatments)
 
         if return_dist:
             return outcomes_dist_samp
@@ -399,7 +402,8 @@ class VCI(nn.Module):
         num = len(outcomes)
         if isinstance(outcomes, list):
             sizes = torch.tensor(
-                [out.size(0) for out in outcomes], device=self.device
+                [out.size(0) for out in outcomes],
+                device=outcomes[0].device
             )
             weights = torch.repeat_interleave(1./sizes, sizes, dim=0)
             outcomes_param = [
@@ -409,7 +413,8 @@ class VCI(nn.Module):
             outcomes = torch.cat(outcomes, 0)
         elif isinstance(outcomes_param[0], list):
             sizes = torch.tensor(
-                [out.size(0) for out in outcomes_param[0]], device=self.device
+                [out.size(0) for out in outcomes_param[0]],
+                device=outcomes_param[0][0].device
             )
             weights = torch.repeat_interleave(1./sizes, sizes, dim=0)
             outcomes = torch.repeat_interleave(outcomes, sizes, dim=0)
@@ -447,168 +452,174 @@ class VCI(nn.Module):
 
         return (logprob.sum(0)/num).mean()
 
-    def loss(self, outcomes, outcomes_dist_samp,
-            cf_outcomes, cf_outcomes_out,
-            latents_dist, cf_latents_dist,
-            treatments, cf_treatments,
-            covariates, kde_kernel_std=1.0):
-        """
-        Compute losses.
-        """
-        # (1) individual-specific likelihood
-        indiv_spec_nllh = -outcomes_dist_samp.log_prob(
-            outcomes.repeat(self.mc_sample_size, *[1]*(outcomes.dim()-1))
-        ).mean()
-
-        # (2) covariate-specific likelihood
-        if self.dist_mode == "discriminate":
-            if self.iteration % self.hparams["discriminator_steps"]:
-                self.update_discriminator(
-                    outcomes, cf_outcomes_out.detach(),
-                    treatments, cf_treatments, covariates
-                )
-
-            covar_spec_nllh = self.loss_discriminator(
-                self.discriminate(cf_outcomes_out, cf_treatments, covariates),
-                torch.ones(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
-            )
-        elif self.dist_mode == "fit":
-            raise NotImplementedError(
-                'TODO: implement dist_mode "fit" for distribution loss')
-        elif self.dist_mode == "match":
-            notNone = [o != None for o in cf_outcomes]
-            cf_outcomes = [o for (o, n) in zip(cf_outcomes, notNone) if n]
-            cf_outcomes_out = cf_outcomes_out[notNone]
-
-            kernel_std = [kde_kernel_std * torch.ones_like(o) 
-                for o in cf_outcomes]
-            covar_spec_nllh = -self.logprob(
-                cf_outcomes_out, (cf_outcomes, kernel_std), dist="normal"
-            )
-
-        # (3) kl divergence
-        kl_divergence = kldiv_normal(
-            latents_dist.mean,
-            latents_dist.stddev,
-            cf_latents_dist.mean,
-            cf_latents_dist.stddev
-        )
-
-        return (indiv_spec_nllh, covar_spec_nllh, kl_divergence)
-
-    def forward(self, outcomes, treatments, cf_treatments, covariates,
-                sample_latent=True, sample_outcome=False, detach_encode=False, detach_eval=True):
+    def forward(self, outcomes, treatments, covariates, cf_treatments,
+                sample_latent=True, sample_outcome=False,
+                detach_encode=False, detach_eval=False):
         """
         Execute the workflow.
         """
 
         # q(z | y, x, t)
-        latents_constr = self.encode(outcomes, treatments, covariates)
-        latents_dist = self.distributionize(
-            latents_constr, dim=self.hparams["latent_dim"], dist="normal"
-        )
+        latents_dist = self.encode(outcomes, treatments, covariates)
+        if detach_eval:
+            latents_dist_eval = self.encode(
+                outcomes, treatments, covariates, evaluate=True)
+        else:
+            latents_dist_eval = latents_dist
 
         # p(y | z, t)
-        outcomes_constr_samp = self.sample(latents_dist.mean, latents_dist.stddev,
-            treatments, size=self.mc_sample_size
-        )
-        outcomes_dist_samp = self.distributionize(outcomes_constr_samp)
+        outcomes_dist_samp = self.sample(
+            latents_dist.mean, latents_dist.stddev, treatments, size=self.mc_sample_size)
 
         # p(y' | z, t')
         if sample_latent:
-            cf_outcomes_constr_out = self.decode(latents_dist.rsample(), cf_treatments)
+            cf_outcomes_dist_out = self.decode(latents_dist.rsample(), cf_treatments)
         else:
-            cf_outcomes_constr_out = self.decode(latents_dist.mean, cf_treatments)
+            cf_outcomes_dist_out = self.decode(latents_dist.mean, cf_treatments)
         if sample_outcome:
-            cf_outcomes_out = self.distributionize(cf_outcomes_constr_out).rsample()
+            cf_outcomes_out = cf_outcomes_dist_out.rsample()
         else:
-            cf_outcomes_out = self.distributionize(cf_outcomes_constr_out).mean
+            cf_outcomes_out = cf_outcomes_dist_out.mean
 
         # q(z | y', x, t')
         if detach_encode:
             if sample_latent:
-                cf_outcomes_constr_in = self.decode(latents_dist.sample(), cf_treatments)
+                cf_outcomes_dist_in = self.decode(latents_dist.sample(), cf_treatments)
             else:
-                cf_outcomes_constr_in = self.decode(latents_dist.mean.detach(), cf_treatments)
+                cf_outcomes_dist_in = self.decode(latents_dist.mean.detach(), cf_treatments)
             if sample_outcome:
-                cf_outcomes_in = self.distributionize(cf_outcomes_constr_in).rsample()
+                cf_outcomes_in = cf_outcomes_dist_in.rsample()
             else:
-                cf_outcomes_in = self.distributionize(cf_outcomes_constr_in).mean
+                cf_outcomes_in = cf_outcomes_dist_in.mean
         else:
             cf_outcomes_in = cf_outcomes_out
+        cf_latents_dist_eval = self.encode(
+            cf_outcomes_in, cf_treatments, covariates, evaluate=detach_eval)
 
-        cf_latents_constr = self.encode(
-            cf_outcomes_in, cf_treatments, covariates, eval=detach_eval
-        )
-        cf_latents_dist = self.distributionize(
-            cf_latents_constr, dim=self.hparams["latent_dim"], dist="normal"
-        )
+        return (outcomes_dist_samp, cf_outcomes_out, latents_dist_eval, cf_latents_dist_eval)
 
-        return (outcomes_dist_samp, cf_outcomes_out, latents_dist, cf_latents_dist)
+    def loss_reconstruction(self, outcomes_dist, outcomes):
+        return -outcomes_dist.log_prob(outcomes).mean()
 
-    def update(self, outcomes, treatments, cf_outcomes, cf_treatments, covariates):
+    def loss_causality(self, cf_outcomes_out, cf_treatments, covariates, cf_outcomes=None,
+                       hinge_threshold=0.05, kde_kernel_std=1.0):
+        if self.dist_mode == "classify":
+            classifier_loss, _ = self.classifier.loss(cf_outcomes_out, cf_treatments, covariates)
+            if hinge_threshold is not None:
+                return F.relu(classifier_loss - hinge_threshold) + hinge_threshold
+            return classifier_loss
+        elif self.dist_mode == "discriminate":
+            return F.softplus(-self.discriminate(cf_outcomes_out, cf_treatments, covariates)).mean()
+        elif self.dist_mode == "match":
+            notNone = [o != None for o in cf_outcomes]
+            cf_outcomes = [o for (o, n) in zip(cf_outcomes, notNone) if n]
+            cf_outcomes_out = cf_outcomes_out[notNone]
+
+            kernel_std = [kde_kernel_std * torch.ones_like(o) for o in cf_outcomes]
+            return -self.logprob(cf_outcomes_out, (cf_outcomes, kernel_std), dist="normal")
+
+    def loss_disentanglement(self, latents_dist, cf_latents_dist):
+        return kldiv_normal(
+            latents_dist.mean, latents_dist.stddev,
+            cf_latents_dist.mean, cf_latents_dist.stddev
+        ).mean()
+
+    def loss(self, outcomes, treatments, covariates, cf_treatments, cf_outcomes=None):
         """
-        Update VCI's parameters given a minibatch of outcomes, treatments, and covariates.
+        Compute losses.
         """
-        outcomes, treatments, cf_outcomes, cf_treatments, covariates = self.move_inputs(
-            outcomes, treatments, cf_outcomes, cf_treatments, covariates
-        )
-
         outcomes_dist_samp, cf_outcomes_out, latents_dist, cf_latents_dist = self.forward(
-            outcomes, treatments, cf_treatments, covariates
+            outcomes, treatments, covariates, cf_treatments
         )
 
-        indiv_spec_nllh, covar_spec_nllh, kl_divergence = self.loss(
-            outcomes, outcomes_dist_samp, cf_outcomes, cf_outcomes_out,
-            latents_dist, cf_latents_dist, treatments, cf_treatments, covariates
+        # (1) individual-specific likelihood
+        indiv_spec_nllh = self.loss_reconstruction(
+            outcomes_dist_samp,
+            outcomes.repeat(self.mc_sample_size, *[1]*(outcomes.dim()-1))
         )
 
-        loss = (self.omega0 * indiv_spec_nllh
+        # (2) covariate-specific likelihood
+        covar_spec_nllh = self.loss_causality(
+            cf_outcomes_out, cf_treatments, covariates, cf_outcomes=cf_outcomes
+        )
+
+        # (3) kl divergence
+        kl_divergence = self.loss_disentanglement(latents_dist, cf_latents_dist)
+
+        return (self.omega0 * indiv_spec_nllh
             + self.omega1 * covar_spec_nllh
             + self.omega2 * kl_divergence
-        )
-
-        self.optimizer_autoencoder.zero_grad()
-        loss.backward()
-        self.optimizer_autoencoder.step()
-        self.iteration += 1
-
-        return {
-            "Indiv-spec NLLH": indiv_spec_nllh.item(),
+        ), {"Indiv-spec NLLH": indiv_spec_nllh.item(),
             "Covar-spec NLLH": covar_spec_nllh.item(),
             "KL Divergence": kl_divergence.item()
         }
 
-    def update_discriminator(self, outcomes, cf_outcomes_out,
-                                treatments, cf_treatments, covariates):
-        loss_tru = self.loss_discriminator(
-            self.discriminate(outcomes, treatments, covariates),
-            torch.ones(outcomes.size(0), device=outcomes.device)
-        )
+    def loss_discriminator(self, outcomes, treatments, covariates, cf_treatments):
+        cf_outcomes = self.generate(outcomes, treatments, covariates, cf_treatments)
 
-        loss_fls = self.loss_discriminator(
-            self.discriminate(cf_outcomes_out, cf_treatments, covariates),
-            torch.zeros(cf_outcomes_out.size(0), device=cf_outcomes_out.device)
-        )
+        score_real = self.discriminate(outcomes, treatments, covariates)
+        score_fake = self.discriminate(cf_outcomes.detach(), cf_treatments, covariates)
 
-        loss = (loss_tru+loss_fls)/2.
-        self.optimizer_discriminator.zero_grad()
-        loss.backward()
-        self.optimizer_discriminator.step()
+        loss_real = F.softplus(-score_real).mean()
+        loss_fake = F.softplus(score_fake).mean()
 
-        return loss.item()
+        return (loss_real+loss_fake)/2., {
+            "Real Sample Loss": loss_real.item(),
+            "Fake Sample Loss": loss_fake.item()
+        }
 
-    def update_eval_encoder(self):
+    def update(self, batch, batch_idx=-1, writer=None):
+        outcomes, treatments, covariates, cf_treatments, cf_outcomes = batch
+
+        loss_log = {}
+
+        if self.dist_mode == "discriminate":
+            self.d_sch.step()
+            if (batch_idx+1) % self.hparams["discriminator_freq"] == 0:
+                d_loss, d_log = self.loss_discriminator(outcomes, treatments, covariates, cf_treatments)
+
+                self.d_opt.zero_grad()
+                d_loss.backward()
+                if self.hparams["max_grad_norm"] > 0:
+                    d_grad_norm = nn.utils.clip_grad_norm_(self.discriminator.parameters(), self.hparams["max_grad_norm"])
+                else:
+                    d_grad_norm = total_grad_norm_(self.discriminator.parameters())
+                if self.hparams["grad_skip_threshold"] < 0 or d_grad_norm < self.hparams["grad_skip_threshold"]:
+                    self.d_opt.step()
+
+                loss_log.update(d_log)
+                if writer is not None:
+                    writer.add_scalar("Discriminator Grad Norm", d_grad_norm.item(), self.iteration)
+
+        self.g_sch.step()
+        g_loss, g_log = self.loss(outcomes, treatments, covariates, cf_treatments, cf_outcomes)
+
+        self.g_opt.zero_grad()
+        g_loss.backward()
+        if self.hparams["max_grad_norm"] > 0:
+            g_grad_norm = nn.utils.clip_grad_norm_(self.generator.parameters(), self.hparams["max_grad_norm"])
+        else:
+            g_grad_norm = total_grad_norm_(self.generator.parameters())
+        if self.hparams["grad_skip_threshold"] < 0 or g_grad_norm < self.hparams["grad_skip_threshold"]:
+            self.g_opt.step()
+
+        loss_log.update(g_log)
+        if writer is not None:
+            writer.add_scalar("Generator Grad Norm", g_grad_norm.item(), self.iteration)
+
+        self.iteration += 1
+
+        return loss_log
+
+    def step(self):
         for target_param, param in zip(
-            self.encoder_eval.parameters(), self.encoder.parameters()
+            self.encoder_eval.parameters(), self.generator["encoder"].parameters()
         ):
             target_param.data.copy_(param.data)
 
-    def early_stopping(self, score):
-        """
-        Decays the learning rate, and possibly early-stops training.
-        """
-        self.scheduler_autoencoder.step()
+    def early_stopping(self, score=None):
+        if score is None:
+            return False
 
         if score > self.best_score:
             self.best_score = score
@@ -616,35 +627,30 @@ class VCI(nn.Module):
         else:
             self.patience_trials += 1
 
-        return self.patience_trials > self.patience
+        return self.patience_trials > self.hparams["patience"]
 
     def init_outcome_emb(self):
-        return MLP(
-            [self.num_outcomes] + [self.hparams["outcome_emb_dim"]] * 2
-        )
+        if self.embed_outcomes:
+            return MLP([self.num_outcomes, self.hparams["outcome_emb_dim"]])
+        else:
+            return nn.Identity()
 
     def init_treatment_emb(self):
-        if self.type_treatments in ("object", "bool", "category", None):
-            return CompoundEmbedding(self.num_treatments, self.hparams["treatment_emb_dim"])
+        if self.embed_treatments:
+            return MLP([self.num_treatments, self.hparams["treatment_emb_dim"]])
         else:
-            return SinusoidalEmbedding(self.num_treatments, self.hparams["treatment_emb_dim"])
+            return nn.Identity()
 
     def init_covariates_emb(self):
-        type_covariates = self.type_covariates
-        if type_covariates is None or isinstance(type_covariates, str):
-            type_covariates = [type_covariates] * len(self.num_covariates)
-
-        covariates_emb = []
-        for num_cov, type_cov in zip(self.num_covariates, type_covariates):
-            if type_cov in ("object", "bool", "category", None):
+        if self.embed_covariates:
+            covariates_emb = []
+            for num_cov in self.num_covariates:
                 covariates_emb.append(
-                    CompoundEmbedding(num_cov, self.hparams["covariate_emb_dim"])
+                    MLP([num_cov, self.hparams["covariate_emb_dim"]])
                 )
-            else:
-                covariates_emb.append(
-                    SinusoidalEmbedding(num_cov, self.hparams["covariate_emb_dim"])
-                )
-        return nn.ModuleList(covariates_emb)
+            return nn.ModuleList(covariates_emb)
+        else:
+            return nn.ModuleList([nn.Identity()]*len(self.num_covariates))
 
     def init_encoder(self):
         return MLP([self.outcome_dim+self.treatment_dim+self.covariate_dim]
@@ -677,21 +683,6 @@ class VCI(nn.Module):
             + [1]
         )
 
-    def move_input(self, input):
-        """
-        Move minibatch tensors to CPU/GPU.
-        """
-        if isinstance(input, list):
-            return [i.to(self.device) if i is not None else None for i in input]
-        else:
-            return input.to(self.device)
-
-    def move_inputs(self, *inputs: torch.Tensor):
-        """
-        Move minibatch tensors to CPU/GPU.
-        """
-        return [self.move_input(i) if i is not None else None for i in inputs]
-
     def to_device(self, device):
         self.device = device
         self.to(self.device)
@@ -702,4 +693,426 @@ class VCI(nn.Module):
         Returns the list of default hyper-parameters for VCI
         """
 
-        return self._set_hparams_(self, "")
+        return self._set_hparams(self, "")
+
+#####################################################
+#                     EXTENSIONS                    #
+#####################################################
+
+from .convolution import ConvModel
+
+from ..utils.model_utils import conv_1x1, conv_3x3, parse_block_string
+
+
+class VCIConv(VCI):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _set_hparams(self, hparams):
+        """
+        Set hyper-parameters to default values or values fixed by user for those
+        hyper-parameters specified in the JSON string `hparams`.
+        """
+
+        self.hparams = {
+            "outcome_emb_dim": 32,
+            "treatment_emb_dim": 8,
+            "covariate_emb_dim": 2,
+            "encoder_resolution": "64*64,32*32,16*16,8*8,4*4,1*1",
+            "encoder_width": "32,64,128,256,512,1024",
+            "encoder_depth": "3,12,12,6,3,3",
+            "decoder_resolution": "1*1,4*4,8*8,16*16,32*32,64*64",
+            "decoder_width": "1024,512,256,128,64,32",
+            "decoder_depth": "3,3,6,12,12,3",
+            "discriminator_resolution": "64*64,32*32,16*16,8*8,4*4,1*1",
+            "discriminator_width": "32,64,128,256,512,1024",
+            "discriminator_depth": "3,12,12,6,3,9",
+            "generator_lr": 0.0003,
+            "generator_wd": 4e-07,
+            "generator_ss": 300000,
+            "discriminator_lr": 0.0003,
+            "discriminator_wd": 4e-07,
+            "discriminator_ss": 300000,
+            "discriminator_freq": 2,
+            "max_grad_norm": -1,
+            "grad_skip_threshold": -1,
+            "patience": 20
+        }
+
+        # the user may fix some hparams
+        if hparams is not None:
+            if isinstance(hparams, str):
+                with open(hparams) as f:
+                    dictionary = json.load(f)
+                self.hparams.update(dictionary)
+            else:
+                self.hparams.update(hparams)
+
+        self.outcome_dim = (
+            (self.hparams["outcome_emb_dim"], *self.num_outcomes[1:]) 
+            if self.embed_outcomes else self.num_outcomes)
+        self.treatment_dim = (
+            self.hparams["treatment_emb_dim"] if self.embed_treatments else self.num_treatments)
+        self.covariate_dim = (
+            self.hparams["covariate_emb_dim"] * len(self.num_covariates) 
+            if self.embed_covariates else sum(self.num_covariates)
+        )
+
+        return self.hparams
+
+    def init_outcome_emb(self):
+        if self.embed_outcomes:
+            return conv_1x1(
+                self.num_outcomes[0],
+                self.hparams["outcome_emb_dim"],
+                len(self.num_outcomes)-1
+            )
+        else:
+            return nn.Identity()
+
+    def init_encoder(self):
+        return ConvModel(
+            *parse_block_string(
+                self.hparams["encoder_resolution"],
+                self.hparams["encoder_width"],
+                self.hparams["encoder_depth"],
+                in_size=self.outcome_dim
+            ),
+            num_features=self.treatment_dim+self.covariate_dim, heads=2,
+            lite_blocks=True, lite_layers=True
+        )
+
+    def init_decoder(self):
+        if self.dist_outcomes == "nb":
+            heads = 2
+        elif self.dist_outcomes == "zinb":
+            heads = 3
+        elif self.dist_outcomes == "normal":
+            heads = 2
+        elif self.dist_outcomes == "bernoulli":
+            heads = 1
+        else:
+            raise ValueError("dist_outcomes not recognized")
+
+        return ConvModel(
+            *parse_block_string(
+                self.hparams["decoder_resolution"],
+                self.hparams["decoder_width"],
+                self.hparams["decoder_depth"],
+                out_size=self.num_outcomes
+            ),
+            num_features=self.treatment_dim, heads=heads,
+            lite_blocks=False, lite_layers=True
+        )
+
+    def init_discriminator(self):
+        return ConvModel(
+            *parse_block_string(
+                self.hparams["discriminator_resolution"],
+                self.hparams["discriminator_width"],
+                self.hparams["discriminator_depth"],
+                in_size=self.outcome_dim,
+                out_size=(1, 1, 1)
+            ),
+            num_features=self.treatment_dim+self.covariate_dim,
+            lite_blocks=True, lite_layers=True, spectral_norm=True
+        )
+
+
+from .hierarchy import HConvEncoder, HConvDecoder
+
+
+class HVCIConv(VCIConv):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _set_hparams(self, hparams):
+        """
+        Set hyper-parameters to default values or values fixed by user for those
+        hyper-parameters specified in the JSON string `hparams`.
+        """
+
+        self.hparams = {
+            "outcome_emb_dim": 32,
+            "treatment_emb_dim": 8,
+            "covariate_emb_dim": 2,
+            "defuse_steps": 3,
+            "encoder_resolution": "64*64,32*32,16*16,8*8,4*4,1*1",
+            "encoder_width": "32,64,128,256,512,1024",
+            "encoder_depth": "3,12,12,6,3,3",
+            "decoder_resolution": "1*1,4*4,8*8,16*16,32*32,64*64",
+            "decoder_width": "1024,512,256,128,64,32",
+            "decoder_depth": "3,3,6,12,12,3",
+            "discriminator_resolution": "64*64,32*32,16*16,8*8,4*4,1*1",
+            "discriminator_width": "32,64,128,256,512,1024",
+            "discriminator_depth": "3,12,12,6,3,9",
+            "generator_lr": 0.0003,
+            "generator_wd": 4e-07,
+            "generator_ss": 300000,
+            "discriminator_lr": 0.0003,
+            "discriminator_wd": 4e-07,
+            "discriminator_ss": 300000,
+            "discriminator_freq": 2,
+            "max_grad_norm": -1,
+            "grad_skip_threshold": -1,
+            "patience": 20
+        }
+
+        # the user may fix some hparams
+        if hparams is not None:
+            if isinstance(hparams, str):
+                with open(hparams) as f:
+                    dictionary = json.load(f)
+                self.hparams.update(dictionary)
+            else:
+                self.hparams.update(hparams)
+
+        self.outcome_dim = (
+            (self.hparams["outcome_emb_dim"], *self.num_outcomes[1:]) 
+            if self.embed_outcomes else self.num_outcomes)
+        self.treatment_dim = (
+            self.hparams["treatment_emb_dim"] if self.embed_treatments else self.num_treatments)
+        self.covariate_dim = (
+            self.hparams["covariate_emb_dim"] * len(self.num_covariates) 
+            if self.embed_covariates else sum(self.num_covariates)
+        )
+
+        return self.hparams
+
+    def encode(self, outcomes, treatments, covariates,
+               distributionize=True, dist="normal", evaluate=False):
+        outcomes = self.generator["outcomes_embeddings"](outcomes)
+        treatments = self.generator["treatments_embeddings"](treatments)
+        covariates = [emb(covars) for covars, emb in 
+            zip(covariates, self.generator["covariates_embeddings"])
+        ]
+
+        if evaluate:
+            outs, hiddens = self.encoder_eval(outcomes, treatments, covariates)
+        else:
+            outs, hiddens = self.generator["encoder"](outcomes, treatments, covariates)
+
+        if distributionize:
+            return [self.distributionize(out, dist=dist) for out in outs], hiddens
+        return outs, hiddens
+
+    def decode(self, latents, treatments,
+               distributionize=True, dist=None):
+        treatments = self.generator["treatments_embeddings"](treatments)
+
+        out, hiddens = self.generator["decoder"](latents, treatments)
+
+        if distributionize:
+            return self.distributionize(out, dist=dist), hiddens
+        return out, hiddens
+
+    def sample(self, mu, sigma, treatments,
+               size=1, distributionize=True, dist=None):
+        mu = [m.repeat(size, *[1]*(m.ndim-1)) for m in mu]
+        sigma = [s.repeat(size, *[1]*(s.ndim-1)) for s in sigma]
+        treatments = treatments.repeat(size, *[1]*(treatments.ndim-1))
+
+        latents = [self.reparameterize(m, s) for m, s in zip(mu, sigma)]
+
+        return self.decode(latents, treatments, distributionize=distributionize, dist=dist)
+
+    def predict(
+        self,
+        outcomes,
+        treatments,
+        covariates,
+        cf_treatments,
+        return_dist=False
+    ):
+        if cf_treatments is None:
+            cf_treatments = treatments
+
+        with torch.autograd.no_grad():
+            latents_dist, _ = self.encode(outcomes, treatments, covariates)
+
+            outcomes_dist, _ = self.decode([d.mean for d in latents_dist], cf_treatments)
+
+        if return_dist:
+            return outcomes_dist
+        else:
+            return outcomes_dist.mean
+
+    def generate(
+        self,
+        outcomes,
+        treatments,
+        covariates,
+        cf_treatments,
+        return_dist=False
+    ):
+        if cf_treatments is None:
+            cf_treatments = treatments
+
+        with torch.autograd.no_grad():
+            latents_dist, _ = self.encode(outcomes, treatments, covariates)
+
+            outcomes_dist_samp, _ = self.decode([d.sample() for d in latents_dist], cf_treatments)
+
+        if return_dist:
+            return outcomes_dist_samp
+        else:
+            return outcomes_dist_samp.mean
+
+    def forward(self, outcomes, treatments, covariates, cf_treatments,
+                sample_latent=True, sample_outcome=False,
+                detach_encode=False, detach_eval=True):
+        """
+        Execute the workflow.
+        """
+
+        # q(z | y, x, t)
+        latents_dist, hiddens_in = self.encode(outcomes, treatments, covariates)
+        if detach_eval:
+            latents_dist_eval, _ = self.encode(
+                outcomes, treatments, covariates, evaluate=True)
+        else:
+            latents_dist_eval = latents_dist
+
+        # p(y | z, t)
+        outcomes_dist_samp, hiddens_out_samp = self.sample(
+            [d.mean for d in latents_dist], [d.stddev for d in latents_dist],
+            treatments, size=self.mc_sample_size)
+
+        # p(y' | z, t')
+        if sample_latent:
+            cf_outcomes_dist_out, cf_hiddens_out = self.decode(
+                [d.rsample() for d in latents_dist], cf_treatments)
+        else:
+            cf_outcomes_dist_out, cf_hiddens_out = self.decode(
+                [d.mean for d in latents_dist], cf_treatments)
+        if sample_outcome:
+            cf_outcomes_out = cf_outcomes_dist_out.rsample()
+        else:
+            cf_outcomes_out = cf_outcomes_dist_out.mean
+
+        # q(z | y', x, t')
+        if detach_encode:
+            if sample_latent:
+                cf_outcomes_dist_in, _ = self.decode(
+                    [d.sample() for d in latents_dist], cf_treatments)
+            else:
+                cf_outcomes_dist_in, _ = self.decode(
+                    [d.mean.detach() for d in latents_dist], cf_treatments)
+            if sample_outcome:
+                cf_outcomes_in = cf_outcomes_dist_in.rsample()
+            else:
+                cf_outcomes_in = cf_outcomes_dist_in.mean
+        else:
+            cf_outcomes_in = cf_outcomes_out
+
+        cf_latents_dist, cf_hiddens_in = self.encode(cf_outcomes_in, cf_treatments, covariates)
+        if detach_eval:
+            cf_latents_dist_eval, _ = self.encode(
+                cf_outcomes_in, cf_treatments, covariates, evaluate=detach_eval)
+        else:
+            cf_latents_dist_eval = cf_latents_dist
+
+        return (
+            outcomes_dist_samp, cf_outcomes_out, latents_dist_eval, cf_latents_dist_eval,
+            hiddens_in, hiddens_out_samp, cf_hiddens_in, cf_hiddens_out
+        )
+
+    def loss_reconstruction(self, outcomes_dist_samp, outcomes,
+                            hiddens_out_samp, hiddens_in, hiddens_ratio=0.5):
+        indiv_spec_nllh = super().loss_reconstruction(outcomes_dist_samp, outcomes)
+
+        for h_out, h_in in zip(hiddens_out_samp, reversed(hiddens_in)):
+            indiv_spec_nllh = (indiv_spec_nllh + 
+                hiddens_ratio * F.mse_loss(h_out, h_in.detach())
+            )
+        return indiv_spec_nllh
+
+    def loss_causality(self, cf_outcomes_out, cf_treatments, covariates,
+                       cf_hiddens_in, cf_hiddens_out, cf_outcomes=None,
+                       hiddens_ratio=0.5, hinge_threshold=0.05, kde_kernel_std=1):
+        covar_spec_nllh = super().loss_causality(
+            cf_outcomes_out, cf_treatments, covariates, cf_outcomes, hinge_threshold, kde_kernel_std
+        )
+
+        for h_in, h_out in zip(cf_hiddens_in, reversed(cf_hiddens_out)):
+            covar_spec_nllh = (covar_spec_nllh + 
+                hiddens_ratio * F.mse_loss(h_in, h_out.detach())
+            )
+        return covar_spec_nllh
+
+    def loss_disentanglement(self, latents_dist, cf_latents_dist):
+        kl_divs = [
+            kldiv_normal(dist.mean, dist.stddev, cf_dist.mean, cf_dist.stddev).mean()
+            for dist, cf_dist in zip(latents_dist, cf_latents_dist)
+        ]
+        return sum(kl_divs)
+
+    def loss(self, outcomes, treatments, covariates, cf_treatments, cf_outcomes=None):
+        """
+        Compute losses.
+        """
+        (
+            outcomes_dist_samp, cf_outcomes_out, latents_dist, cf_latents_dist,
+            hiddens_in, hiddens_out_samp, cf_hiddens_in, cf_hiddens_out
+        ) = self.forward(outcomes, treatments, covariates, cf_treatments)
+
+        # (1) individual-specific likelihood
+        indiv_spec_nllh = self.loss_reconstruction(
+            outcomes_dist_samp,
+            outcomes.repeat(self.mc_sample_size, *[1]*(outcomes.dim()-1)),
+            hiddens_out_samp,
+            [hidden.repeat(self.mc_sample_size, *[1]*(hidden.dim()-1)) for hidden in hiddens_in]
+        )
+
+        # (2) covariate-specific likelihood
+        covar_spec_nllh = self.loss_causality(
+            cf_outcomes_out, cf_treatments, covariates,
+            cf_hiddens_in, cf_hiddens_out,
+            cf_outcomes=cf_outcomes
+        )
+
+        # (3) kl divergence
+        kl_divergence = self.loss_disentanglement(latents_dist, cf_latents_dist)
+
+        return (self.omega0 * indiv_spec_nllh
+            + self.omega1 * covar_spec_nllh
+            + self.omega2 * kl_divergence
+        ), {"Indiv-spec NLLH": indiv_spec_nllh.item(),
+            "Covar-spec NLLH": covar_spec_nllh.item(),
+            "KL Divergence": kl_divergence.item()
+        }
+
+    def init_encoder(self):
+        return HConvEncoder(
+            *parse_block_string(
+                self.hparams["encoder_resolution"],
+                self.hparams["encoder_width"],
+                self.hparams["encoder_depth"],
+                in_size=self.outcome_dim
+            ),
+            num_features=self.treatment_dim+self.covariate_dim, heads=2,
+            defuse_steps=self.hparams["defuse_steps"]
+        )
+
+    def init_decoder(self):
+        if self.dist_outcomes == "nb":
+            heads = 2
+        elif self.dist_outcomes == "zinb":
+            heads = 3
+        elif self.dist_outcomes == "normal":
+            heads = 2
+        elif self.dist_outcomes == "bernoulli":
+            heads = 1
+        else:
+            raise ValueError("dist_outcomes not recognized")
+
+        return HConvDecoder(
+            *parse_block_string(
+                self.hparams["decoder_resolution"],
+                self.hparams["decoder_width"],
+                self.hparams["decoder_depth"],
+                out_size=self.num_outcomes
+            ),
+            num_features=self.treatment_dim, heads=heads,
+            construct_steps=self.hparams["defuse_steps"]
+        )

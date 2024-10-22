@@ -1,5 +1,7 @@
 import os
+import gzip
 import json
+import struct
 import logging
 
 import numpy as np
@@ -39,3 +41,31 @@ def unique_ind(records_array):
     res = np.split(idx_sort, idx_start[1:])
 
     return dict(zip(vals, res))
+
+def _load_uint8(f):
+    idx_dtype, ndim = struct.unpack('BBBB', f.read(4))[2:]
+    shape = struct.unpack('>' + 'I' * ndim, f.read(4 * ndim))
+    buffer_length = int(np.prod(shape))
+    data = np.frombuffer(f.read(buffer_length), dtype=np.uint8).reshape(shape)
+    return data
+
+def load_idx(path: str) -> np.ndarray:
+    """Reads an array in IDX format from disk.
+
+    Parameters
+    ----------
+    path : str
+        Path of the input file. Will uncompress with `gzip` if path ends in '.gz'.
+
+    Returns
+    -------
+    np.ndarray
+        Output array of dtype ``uint8``.
+
+    References
+    ----------
+    http://yann.lecun.com/exdb/mnist/
+    """
+    open_fcn = gzip.open if path.endswith('.gz') else open
+    with open_fcn(path, 'rb') as f:
+        return _load_uint8(f)
