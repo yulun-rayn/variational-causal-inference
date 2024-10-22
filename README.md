@@ -2,7 +2,7 @@
 
 This repository is the official implementation of [**Variational Causal Inference**](https://arxiv.org/abs/2209.05935).
 
-![](figure/causal-diagram.png)
+![](figure/workflow.png)
 
 
 ## Installation
