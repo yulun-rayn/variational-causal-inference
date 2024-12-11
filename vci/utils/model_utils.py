@@ -56,10 +56,20 @@ def parse_block_string(res, width, depth, in_size=None, out_size=None):
 
     return layers_res, layers_width
 
-def get_lr_lambda(decay_iters, warmup_iters=100, decay_rate=0.1):
-    def f(iteration):
-        rate = 1.0 if iteration > warmup_iters else iteration / warmup_iters
-        return rate * decay_rate ** (iteration // decay_iters)
+def lr_lambda_exp(decay_epochs, decay_rate=0.1):
+    def f(epoch):
+        return decay_rate ** (epoch // decay_epochs)
+    return f
+
+def lr_lambda_lin(total_epochs, fixed_epochs=100):
+    def f(epoch):
+        if epoch <= fixed_epochs:
+            rate = 1.0
+        elif epoch >= total_epochs:
+            rate = 0.0
+        else:
+            rate = (total_epochs - epoch) / (total_epochs - fixed_epochs)
+        return rate
     return f
 
 def total_grad_norm_(

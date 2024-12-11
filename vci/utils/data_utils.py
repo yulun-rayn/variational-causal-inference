@@ -11,7 +11,6 @@ from sklearn import preprocessing
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
@@ -93,7 +92,7 @@ def data_collate(batch, nb_dims=1):
         return torch.tensor(batch, dtype=torch.float64)
     elif isinstance(elem, int):
         return torch.tensor(batch)
-    elif isinstance(elem, string_classes):
+    elif isinstance(elem, str):
         return batch
     elif isinstance(elem, collections.abc.Mapping):
         try:

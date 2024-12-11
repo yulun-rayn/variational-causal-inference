@@ -9,9 +9,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-from .classifier import Classifier, ClassifierConv
 from .distribution import Bernoulli, NegativeBinomial, ZeroInflatedNegativeBinomial
 from .module import MLP
+from .classifier import load_classifier
 
 from ..utils.math_utils import (
     logprob_normal, kldiv_normal,
@@ -19,29 +19,24 @@ from ..utils.math_utils import (
     logprob_nb_positive,
     logprob_zinb_positive
 )
-from ..utils.model_utils import get_lr_lambda, total_grad_norm_
+from ..utils.model_utils import lr_lambda_exp, lr_lambda_lin, total_grad_norm_
 
 #####################################################
 #                     LOAD MODEL                    #
 #####################################################
 
 def load_VCI(args, state_dict=None, device="cuda"):
-    if args["checkpoint_classifier"] is not None:
+    if args["dist_mode"] == "classify":
+        assert args["checkpoint_classifier"] is not None
         state_dict_classifier, args_classifier = torch.load(
             args["checkpoint_classifier"], map_location="cpu")
 
-    classifier = None
-    if args["data_name"] == "gene":
-        if args["dist_mode"] == "classify":
-            classifier = Classifier(
-                args_classifier["num_outcomes"],
-                args_classifier["num_treatments"],
-                args_classifier["num_covariates"],
-                hparams=args_classifier["hparams"]
-            )
-            classifier.load_state_dict(state_dict_classifier)
-            classifier.eval()
+        classifier = load_classifier(args_classifier, state_dict_classifier)
+        classifier.eval()
+    else:
+        classifier = None
 
+    if args["data_name"] == "gene":
         model = VCI(
             args["num_outcomes"],
             args["num_treatments"],
@@ -56,20 +51,11 @@ def load_VCI(args, state_dict=None, device="cuda"):
             dist_mode=args["dist_mode"],
             classifier=classifier,
             mc_sample_size=30,
+            lr_lambda=lr_lambda_exp,
             device=device,
             hparams=args["hparams"]
         )
-    elif args["data_name"] in ("celebA", "morphoMNIST"):
-        if args["dist_mode"] == "classify":
-            classifier = ClassifierConv(
-                args_classifier["num_outcomes"],
-                args_classifier["num_treatments"],
-                args_classifier["num_covariates"],
-                hparams=args_classifier["hparams"]
-            )
-            classifier.load_state_dict(state_dict_classifier)
-            classifier.eval()
-
+    elif args["data_name"] == "celebA":
         model = HVCIConv(
             args["num_outcomes"],
             args["num_treatments"],
@@ -84,6 +70,26 @@ def load_VCI(args, state_dict=None, device="cuda"):
             dist_mode=args["dist_mode"],
             classifier=classifier,
             mc_sample_size=3,
+            lr_lambda=lr_lambda_exp,
+            device=device,
+            hparams=args["hparams"]
+        )
+    elif args["data_name"] == "morphoMNIST":
+        model = HVCIConv(
+            args["num_outcomes"],
+            args["num_treatments"],
+            args["num_covariates"],
+            embed_outcomes=True,
+            embed_treatments=True,
+            embed_covariates=False,
+            omega0=args["omega0"],
+            omega1=args["omega1"],
+            omega2=args["omega2"],
+            dist_outcomes=args["dist_outcomes"],
+            dist_mode=args["dist_mode"],
+            classifier=classifier,
+            mc_sample_size=3,
+            lr_lambda=(lambda e: lr_lambda_lin(args["max_epochs"], fixed_epochs=e)),
             device=device,
             hparams=args["hparams"]
         )
@@ -115,6 +121,7 @@ class VCI(nn.Module):
         dist_mode="match",
         classifier=None,
         mc_sample_size=30,
+        lr_lambda=lr_lambda_exp,
         device="cuda",
         hparams=""
     ):
@@ -128,6 +135,7 @@ class VCI(nn.Module):
         self.embed_covariates = embed_covariates
         self.dist_outcomes = dist_outcomes
         self.mc_sample_size = mc_sample_size
+        self.lr_lambda = lr_lambda
         # vci parameters
         self.omega0 = omega0
         self.omega1 = omega1
@@ -170,11 +178,10 @@ class VCI(nn.Module):
             "discriminator_depth": 3,
             "generator_lr": 3e-4,
             "generator_wd": 4e-7,
-            "generator_ss": 300000,
             "discriminator_lr": 3e-4,
             "discriminator_wd": 4e-7,
-            "discriminator_ss": 300000,
             "discriminator_freq": 2,
+            "opt_step_size": 400,
             "max_grad_norm": -1,
             "grad_skip_threshold": -1,
             "patience": 20,
@@ -226,7 +233,7 @@ class VCI(nn.Module):
             weight_decay=self.hparams["generator_wd"],
         )
         self.g_sch = torch.optim.lr_scheduler.LambdaLR(
-            self.g_opt, lr_lambda=get_lr_lambda(self.hparams["generator_ss"])
+            self.g_opt, lr_lambda=self.lr_lambda(self.hparams["opt_step_size"])
         )
 
     def _init_covar_model(self):
@@ -255,7 +262,7 @@ class VCI(nn.Module):
                 weight_decay=self.hparams["discriminator_wd"],
             )
             self.d_sch = torch.optim.lr_scheduler.LambdaLR(
-                self.d_opt, lr_lambda=get_lr_lambda(self.hparams["discriminator_ss"])
+                self.d_opt, lr_lambda=self.lr_lambda(self.hparams["opt_step_size"])
             )
         elif self.dist_mode == "match":
             pass
@@ -574,7 +581,6 @@ class VCI(nn.Module):
         loss_log = {}
 
         if self.dist_mode == "discriminate":
-            self.d_sch.step()
             if (batch_idx+1) % self.hparams["discriminator_freq"] == 0:
                 d_loss, d_log = self.loss_discriminator(outcomes, treatments, covariates, cf_treatments)
 
@@ -591,7 +597,6 @@ class VCI(nn.Module):
                 if writer is not None:
                     writer.add_scalar("Discriminator Grad Norm", d_grad_norm.item(), self.iteration)
 
-        self.g_sch.step()
         g_loss, g_log = self.loss(outcomes, treatments, covariates, cf_treatments, cf_outcomes)
 
         self.g_opt.zero_grad()
@@ -612,6 +617,10 @@ class VCI(nn.Module):
         return loss_log
 
     def step(self):
+        if self.dist_mode == "discriminate":
+            self.d_sch.step()
+        self.g_sch.step()
+
         for target_param, param in zip(
             self.encoder_eval.parameters(), self.generator["encoder"].parameters()
         ):
@@ -729,11 +738,10 @@ class VCIConv(VCI):
             "discriminator_depth": "3,12,12,6,3,9",
             "generator_lr": 0.0003,
             "generator_wd": 4e-07,
-            "generator_ss": 300000,
             "discriminator_lr": 0.0003,
             "discriminator_wd": 4e-07,
-            "discriminator_ss": 300000,
             "discriminator_freq": 2,
+            "opt_step_size": 400,
             "max_grad_norm": -1,
             "grad_skip_threshold": -1,
             "patience": 20
@@ -848,11 +856,10 @@ class HVCIConv(VCIConv):
             "discriminator_depth": "3,12,12,6,3,9",
             "generator_lr": 0.0003,
             "generator_wd": 4e-07,
-            "generator_ss": 300000,
             "discriminator_lr": 0.0003,
             "discriminator_wd": 4e-07,
-            "discriminator_ss": 300000,
             "discriminator_freq": 2,
+            "opt_step_size": 400,
             "max_grad_norm": -1,
             "grad_skip_threshold": -1,
             "patience": 20
