@@ -81,9 +81,8 @@ def gene_evaluate_r2_native(model, dataset, dataset_control,
             # estimate metrics only for reasonably-sized perturbation/cell-type combos
             if len(idx) > min_samples:
                 cov_pert = dataset.cov_pert[idx[0]]
-                de_idx = np.where(
-                    dataset.var_names.isin(np.array(dataset.de_genes[cov_pert]))
-                )[0]
+                de_genes = np.array(dataset.de_genes.get(cov_pert, []))
+                de_idx = np.where(dataset.var_names.isin(de_genes))[0] if de_genes.size > 0 else np.array([])
 
                 perts = dataset.perturbations[idx[0]].view(1, -1).repeat(num, 1).clone()
 
@@ -109,13 +108,15 @@ def gene_evaluate_r2_native(model, dataset, dataset_control,
 
                 yp_m = yp.mean(0)
                 mean_score_mean.append(r2_score(yt_m, yp_m))
-                mean_score_de_mean.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
+                if de_idx.size > 0:
+                    mean_score_de_mean.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
                 if pert_category in pert_names_control_cats:
                     pert_idx = pert_names_control_cats[pert_category]
 
                     yp_r = yp_m + (genes_control[pert_idx] - yp[pert_idx]).mean(0)
                     mean_score_robust.append(r2_score(yt_m, yp_r))
-                    mean_score_de_robust.append(r2_score(yt_m[de_idx], yp_r[de_idx]))
+                    if de_idx.size > 0:
+                        mean_score_de_robust.append(r2_score(yt_m[de_idx], yp_r[de_idx]))
 
     return [
         np.mean(s) if len(s) else -1
@@ -175,9 +176,8 @@ def gene_evaluate_r2_classic(model, dataset, dataset_control, batch_size=None, m
 
     for pert_category in np.unique(dataset.cov_pert):
         # pert_category category contains: 'cov_pert' info
-        de_idx = np.where(
-            dataset.var_names.isin(np.array(dataset.de_genes[pert_category]))
-        )[0]
+        de_genes = np.array(dataset.de_genes.get(pert_category, []))
+        de_idx = np.where(dataset.var_names.isin(de_genes))[0] if de_genes.size > 0 else np.array([])
 
         idx = np.where(dataset.cov_pert == pert_category)[0]
 
@@ -211,7 +211,8 @@ def gene_evaluate_r2_classic(model, dataset, dataset_control, batch_size=None, m
             yt_m = yt.mean(axis=0)
 
             mean_score.append(r2_score(yt_m, yp_m))
-            mean_score_de.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
+            if de_idx.size > 0:
+                mean_score_de.append(r2_score(yt_m[de_idx], yp_m[de_idx]))
 
     return [
         np.mean(s) if len(s) else -1
