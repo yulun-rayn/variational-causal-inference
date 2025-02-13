@@ -109,7 +109,7 @@ class HConvDecoder(nn.Module):
     def __init__(self, resolutions, sizes, num_features,
                  heads=None, lite_blocks=False, lite_layers=True,
                  spectral_norm=False, rescale_first=False,
-                 construct_steps=1):
+                 infuse_steps=1):
         super().__init__()
         assert len(resolutions) == len(sizes)
         dim = len(resolutions[0])
@@ -121,7 +121,7 @@ class HConvDecoder(nn.Module):
         latent_biases = []
         in_size = sizes[0][0]
         feature_width = num_features + in_size
-        for i in range(len(sizes)-construct_steps):
+        for i in range(len(sizes)-infuse_steps):
             up_rate = []
             for res_in, res_out in zip(resolutions[i], resolutions[i+1]):
                 assert res_out % res_in == 0
@@ -160,7 +160,7 @@ class HConvDecoder(nn.Module):
 
         # Constructing Chunks
         final_chunks = []
-        for i in range(len(sizes)-construct_steps, len(sizes)):
+        for i in range(len(sizes)-infuse_steps, len(sizes)):
             up_rate = []
             for res_in, res_out in zip(resolutions[i], resolutions[i+1]):
                 assert res_out % res_in == 0

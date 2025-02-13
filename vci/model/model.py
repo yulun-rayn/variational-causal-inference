@@ -1121,5 +1121,5 @@ class HVCIConv(VCIConv):
                 out_size=self.num_outcomes
             ),
             num_features=self.treatment_dim, heads=heads,
-            construct_steps=self.hparams["defuse_steps"]
+            infuse_steps=self.hparams["defuse_steps"]
         )
