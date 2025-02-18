@@ -6,7 +6,7 @@ conda activate vci-env
 DATA=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 PYARGS=""
-PYARGS="$PYARGS --name marson-test-lr-lambda3"
+PYARGS="$PYARGS --name marson-test"
 PYARGS="$PYARGS --data_name gene"
 PYARGS="$PYARGS --data_path $DATA/datasets/marson_prepped.h5ad" #sciplex_prepped.h5ad
 PYARGS="$PYARGS --artifact_path $DATA/artifact"

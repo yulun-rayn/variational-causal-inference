@@ -123,7 +123,7 @@ class VCI(nn.Module):
         mc_sample_size=30,
         lr_lambda=lr_lambda_exp,
         device="cuda",
-        hparams=""
+        hparams=None
     ):
         super().__init__()
         # generic attributes

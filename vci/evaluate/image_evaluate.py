@@ -8,7 +8,7 @@ from torchvision.utils import save_image
 
 from ..utils.data_utils import move_tensors
 
-def image_evaluate(model, datasets, save_dir="", epoch=-1, sample_size=3, save_orig=True, **kwargs):
+def image_evaluate(model, datasets, save_dir="", epoch=-1, sample_size=3, counterfactual_size=5, save_orig=True, **kwargs):
     dataset = datasets["test"]
     labels_eval = [np.unique(dataset.labels[:, i].tolist()) for i in range(dataset.labels.shape[1])]
 
@@ -18,8 +18,8 @@ def image_evaluate(model, datasets, save_dir="", epoch=-1, sample_size=3, save_o
             data, _, covars, _, _ = dataset[idx]
             label = np.array(dataset.labels[idx])
             for i, labs_e in enumerate(labels_eval):
-                if len(labs_e) > 100: # if too many labels to traverse
-                    labs_e = labs_e[np.arange(0, len(labs_e), int(len(labs_e)/100))]
+                if len(labs_e) > counterfactual_size: # if too many labels to traverse
+                    labs_e = labs_e[np.arange(0, len(labs_e), int(len(labs_e)/counterfactual_size))]
                 dat = data.repeat(len(labs_e), *[1]*data.dim())
                 lab = np.tile(label, (len(labs_e), 1))
                 covs = [cov.repeat(len(labs_e), 1) for cov in covars]
@@ -32,7 +32,7 @@ def image_evaluate(model, datasets, save_dir="", epoch=-1, sample_size=3, save_o
 
                 outs = model.predict(*move_tensors(
                     dat, lab, covs, cf_lab, device=model.device
-                )).detach().cpu()
+                )).cpu()
 
                 if save_orig:
                     outs = torch.cat([data.unsqueeze(0), outs], dim=0)

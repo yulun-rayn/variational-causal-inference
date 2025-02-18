@@ -8,7 +8,7 @@ from ..utils.data_utils import move_tensors
 def evaluate(model, datasets, data_name="image", **kwargs):
     if data_name == "gene":
         return gene_evaluate(model, datasets, **kwargs)
-    elif data_name in ("celebA", "morphoMNIST", "ADNI", "openBHB"):
+    elif data_name in ("celebA", "morphoMNIST"):
         return image_evaluate(model, datasets, **kwargs)
     else:
         raise ValueError("name not recognized")

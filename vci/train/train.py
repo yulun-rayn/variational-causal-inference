@@ -48,7 +48,6 @@ def train(args, prepare=prepare, evaluate=evaluate):
     os.makedirs(save_dir, exist_ok=True)
 
     ljson({"training_args": args})
-    ljson({"model_params": model.hparams})
     logging.info("")
     start_time = time.time()
     for epoch in range(args["max_epochs"]):

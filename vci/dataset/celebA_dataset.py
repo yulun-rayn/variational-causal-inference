@@ -36,7 +36,7 @@ class CelebADataset(BaseDataset):
         # image
         images = splits.index
 
-        transform = self.get_transform(image_size)
+        transform = self.get_transform(image_size, split)
 
         images = images[mask]
         images = [fn("img_align_celeba", image) for image in images]
@@ -51,14 +51,21 @@ class CelebADataset(BaseDataset):
 
         super().__init__(images, labels, transform=transform, target_transform=target_transform, load_fn=Image.open)
 
-    def get_transform(self, image_size):
-        return transforms.Compose([
-            transforms.CenterCrop(128),
-            transforms.RandomCrop((120, 120)),
-            transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ToTensor()
-        ])
+    def get_transform(self, image_size, split):
+        if split == "train":
+            return transforms.Compose([
+                transforms.CenterCrop(128),
+                transforms.RandomCrop((120, 120)),
+                transforms.Resize(image_size),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor()
+            ])
+        else:
+            return transforms.Compose([
+                transforms.CenterCrop(120),
+                transforms.Resize(image_size),
+                transforms.ToTensor()
+            ])
 
     def get_target_transform(self, labels):
         return AttrEncoder(labels)

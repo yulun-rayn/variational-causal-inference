@@ -51,7 +51,7 @@ class Classifier(nn.Module):
         num_treatments,
         num_covariates,
         device="cuda",
-        hparams=""
+        hparams=None
     ):
         super().__init__()
         # generic attributes
