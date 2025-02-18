@@ -11,9 +11,9 @@ PYARGS="$PYARGS --data_name celebA"
 PYARGS="$PYARGS --data_path $DATA/data/celebA"
 PYARGS="$PYARGS --artifact_path $DATA/artifact/classifier"
 PYARGS="$PYARGS --hparams hparams/hparams_celebA.json"
-PYARGS="$PYARGS --gpu 0" #PYARGS="$PYARGS --cpu"
+PYARGS="$PYARGS --device cuda:0"
 
-PYARGS="$PYARGS --max_epochs 2000"
+PYARGS="$PYARGS --max_epochs 200"
 PYARGS="$PYARGS --batch_size 64"
 
 python main_classifier.py $PYARGS

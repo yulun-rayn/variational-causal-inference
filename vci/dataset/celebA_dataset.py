@@ -18,7 +18,7 @@ from ..utils.data_utils import AttrEncoder
 class CelebADataset(BaseDataset):
     base_folder = "celeba"
 
-    def __init__(self, root, label_idx = [15, 31], image_size=(64, 64), split="train"):
+    def __init__(self, root, label_idx=[15, 31], image_size=(64, 64), split="train"):
         split_map = {
             "train": 0,
             "valid": 1,

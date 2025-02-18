@@ -12,12 +12,7 @@ if not sys.warnoptions:
     warnings.simplefilter("ignore")
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-def load_dataset_splits(
-    data_name: str,
-    data_path: str,
-    sample_cf: bool = False
-):
-
+def load_dataset_splits(data_name, data_path, label_names=None, sample_cf=False):
     if data_name == "gene":
         dataset = GeneDataset(
             data_path, "perturbation", "control", "dose", "covariates", "split", 
@@ -30,13 +25,18 @@ def load_dataset_splits(
             "ood": dataset.subset("ood", "all"),
         }
     elif data_name == "celebA":
+        if label_names is None:
+            label_names = [15, 31]
+
         return {
-            "train": CelebADataset(data_path, split="train"),
-            "valid": CelebADataset(data_path, split="valid"),
-            "test": CelebADataset(data_path, split="test"),
+            "train": CelebADataset(data_path, label_idx=label_names, split="train"),
+            "valid": CelebADataset(data_path, label_idx=label_names, split="valid"),
+            "test": CelebADataset(data_path, label_idx=label_names, split="test"),
         }
     elif data_name == "morphoMNIST":
-        dataset = MorphoMNISTDataset(data_path)
+        if label_names is None:
+            label_names = ["thickness", "intensity"]
+        dataset = MorphoMNISTDataset(data_path, label_names=label_names)
 
         return {
             "train": dataset.get_split("train"),

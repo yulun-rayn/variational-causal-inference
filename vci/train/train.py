@@ -24,13 +24,7 @@ def train(args, prepare=prepare, evaluate=evaluate):
     if args["checkpoint"] is not None:
         state_dict, args = torch.load(args["checkpoint"], map_location="cpu")
 
-    device = (
-        "cuda:" + str(args["gpu"])
-            if (not args["cpu"]) 
-                and torch.cuda.is_available() 
-            else 
-        "cpu"
-    )
+    device = args["device"] if torch.cuda.is_available() else "cpu"
 
     if args["seed"] is not None:
         np.random.seed(args["seed"])

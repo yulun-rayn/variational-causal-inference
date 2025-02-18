@@ -47,7 +47,7 @@ class MorphoMNISTDataset:
         images = load_idx(path_to_images)
 
         attrs = pd.read_csv(path_to_attr)
-        attrs['label'] = load_idx(path_to_labels)
+        attrs['label'] = load_idx(path_to_labels).astype(str)
         attrs.drop(list(attrs.filter(regex='Unnamed')), axis=1, inplace=True)
         attrs = attrs[self.label_names]
 

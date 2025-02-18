@@ -11,7 +11,7 @@ PYARGS="$PYARGS --data_name morphoMNIST"
 PYARGS="$PYARGS --data_path $DATA/data/morphoMNIST"
 PYARGS="$PYARGS --artifact_path $DATA/artifact"
 PYARGS="$PYARGS --hparams hparams/hparams_morphoMNIST.json"
-PYARGS="$PYARGS --gpu 0" #PYARGS="$PYARGS --cpu"
+PYARGS="$PYARGS --device cuda:0"
 
 PYARGS="$PYARGS --omega0 10.0"
 PYARGS="$PYARGS --omega1 0.02"

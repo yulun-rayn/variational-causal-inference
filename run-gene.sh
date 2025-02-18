@@ -11,7 +11,7 @@ PYARGS="$PYARGS --data_name gene"
 PYARGS="$PYARGS --data_path $DATA/datasets/marson_prepped.h5ad" #sciplex_prepped.h5ad
 PYARGS="$PYARGS --artifact_path $DATA/artifact"
 PYARGS="$PYARGS --hparams hparams/hparams_gene.json"
-PYARGS="$PYARGS --gpu 0" #PYARGS="$PYARGS --cpu"
+PYARGS="$PYARGS --device cuda:0"
 
 PYARGS="$PYARGS --omega0 1.0"
 PYARGS="$PYARGS --omega1 1.7"

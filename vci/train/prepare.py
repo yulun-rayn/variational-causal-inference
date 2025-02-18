@@ -13,6 +13,7 @@ def prepare(args, state_dict=None, device="cuda"):
     # dataset
     datasets = load_dataset_splits(
         args["data_name"], args["data_path"],
+        label_names=(args["label_names"].split(",") if args["label_names"] is not None else None),
         sample_cf=(True if args["dist_mode"] == "match" else False),
     )
 
@@ -46,6 +47,7 @@ def prepare_classifier(args, state_dict=None, device="cuda"):
     # dataset
     datasets = load_dataset_splits(
         args["data_name"], args["data_path"],
+        label_names=(args["label_names"].split(",") if args["label_names"] is not None else None),
         sample_cf=False,
     )
 

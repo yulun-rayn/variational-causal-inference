@@ -16,7 +16,7 @@
     "classifier_width": "32,64,128,256,512,1024", 
     "classifier_depth": "3,12,12,6,3,9", 
     "generator_lr": 0.0003, 
-    "generator_wd": 4e-07,  
+    "generator_wd": 4e-07, 
     "discriminator_lr": 0.0003, 
     "discriminator_wd": 4e-07, 
     "classifier_lr": 0.0003, 
