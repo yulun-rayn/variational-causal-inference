@@ -15,7 +15,7 @@ PYARGS="$PYARGS --hparams hparams/hparams_morphoMNIST.json"
 PYARGS="$PYARGS --device cuda:0"
 
 PYARGS="$PYARGS --omega0 10.0"
-PYARGS="$PYARGS --omega1 0.20"
+PYARGS="$PYARGS --omega1 0.50"
 PYARGS="$PYARGS --omega2 0.01"
 PYARGS="$PYARGS --dist_outcomes bernoulli"
 PYARGS="$PYARGS --dist_mode discriminate"
