@@ -1,8 +1,17 @@
 # Variational Causal Inference
 
+![](figure/workflow.png)
+
 This repository is the official implementation of [**Variational Causal Inference**](https://arxiv.org/abs/2410.12730).
 
-![](figure/workflow.png)
+```BiBTeX
+@article{wu2024counterfactual,
+  title={Counterfactual Generative Modeling with Variational Causal Inference},
+  author={Wu, Yulun and McConnell, Louie and Iriondo, Claudia},
+  journal={International Conference on Learning Representations},
+  year={2025}
+}
+```
 
 
 ## Installation
