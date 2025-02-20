@@ -1,8 +1,8 @@
 # Variational Causal Inference
 
-![](figure/workflow.png)
-
 This repository is the official implementation of [**Variational Causal Inference**](https://arxiv.org/abs/2410.12730).
+
+![](figure/workflow.png)
 
 ```BiBTeX
 @article{wu2024counterfactual,
