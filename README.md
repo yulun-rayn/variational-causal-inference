@@ -72,6 +72,11 @@ Once the environment is set up and the data are prepared, the function call to t
 A list of flags may be found in these run files and `main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
 
 
+## Architecture
+
+The VCI framework is about the innovation of training workflow and training loss, and not about a specific model architecture. Hence, practitioners are free to use the latest development in vision models, for example, or any model architecture of their liking by simply replacing encoder $q_\phi$ in the [encoder constructor](https://github.com/yulun-rayn/variational-causal-inference/blob/8c3ca43d9dfdbe20d0515622fafe35bf88f71359/vci/model/model.py#L781) and decoder $p_\theta$ in the [decoder constructor](https://github.com/yulun-rayn/variational-causal-inference/blob/8c3ca43d9dfdbe20d0515622fafe35bf88f71359/vci/model/model.py#L805) with the desired models. Note that if the desired models have different output format, other class methods might also need to be updated. For example, our [hierarchical models](vci/model/hierarchy.py) return a tuple instead of a tensor, and several methods are adapted accordingly in the [corresponding wrapper](https://github.com/yulun-rayn/variational-causal-inference/blob/8c3ca43d9dfdbe20d0515622fafe35bf88f71359/vci/model/model.py#L833).
+
+
 ## License
 
 Contributions are welcome! All content here is licensed under the MIT license.
