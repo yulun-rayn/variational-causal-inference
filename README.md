@@ -76,6 +76,8 @@ A list of flags may be found in these run files and `main.py` for experimentatio
 
 The VCI framework is about the innovation of training workflow and training loss, and not about a specific model architecture. Hence, practitioners are free to use the latest development in vision models, for example, or any model architecture of their liking by simply replacing encoder $q_\phi$ in the [encoder constructor](https://github.com/yulun-rayn/variational-causal-inference/blob/8c3ca43d9dfdbe20d0515622fafe35bf88f71359/vci/model/model.py#L781) and decoder $p_\theta$ in the [decoder constructor](https://github.com/yulun-rayn/variational-causal-inference/blob/8c3ca43d9dfdbe20d0515622fafe35bf88f71359/vci/model/model.py#L805) with the desired models. Note that if the desired models have different output format, other class methods might also need to be updated. For example, our [hierarchical models](vci/model/hierarchy.py) return a tuple instead of a tensor, and several methods are adapted accordingly in the [corresponding wrapper](https://github.com/yulun-rayn/variational-causal-inference/blob/8c3ca43d9dfdbe20d0515622fafe35bf88f71359/vci/model/model.py#L833).
 
+Alternatively, if researchers would like to incorporate our training workflow and training loss into their own codebase with their model architectures reside, they can do so by simply adapting the [forward method](https://github.com/yulun-rayn/variational-causal-inference/blob/65a1f80b69916d2de54bc2a98162cb5adbbf94ff/vci/model/model.py#L462) and the [loss method](https://github.com/yulun-rayn/variational-causal-inference/blob/65a1f80b69916d2de54bc2a98162cb5adbbf94ff/vci/model/model.py#L534) into their module.
+
 
 ## License
 
