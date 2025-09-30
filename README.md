@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 Visit our [resource site](https://osf.io/q6tpk/) to download the datasets.
 
-### Single-cell Perturbation Dataset
+### --- Single-cell Perturbation Dataset Preparation ---
 Download the contents of `cell/` into [datasets](datasets). To see how to process your own dataset, download the contents of `raw/` into [datasets](datasets) and follow the examples. A clean example of data preparation can be found in [SciplexPrep.ipynb](datasets/SciplexPrep.ipynb). For an example of data preparation on a messier dataset with thorough analysis and visualizations, see [MarsonPrep.ipynb](datasets/MarsonPrep.ipynb).
 
 In summary, the preparation procedure includes:
