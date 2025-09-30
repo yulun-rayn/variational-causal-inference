@@ -5,10 +5,10 @@ This repository is the official implementation of [**Variational Causal Inferenc
 ![](figure/workflow.png)
 
 ```BiBTeX
-@article{wu2024counterfactual,
+@inproceedings{wucounterfactual,
   title={Counterfactual Generative Modeling with Variational Causal Inference},
-  author={Wu, Yulun and McConnell, Louie and Iriondo, Claudia},
-  journal={International Conference on Learning Representations},
+  author={Wu, Yulun and McConnell, Louis and Iriondo, Claudia},
+  booktitle={The Thirteenth International Conference on Learning Representations},
   year={2025}
 }
 ```
@@ -18,7 +18,6 @@ This repository is the official implementation of [**Variational Causal Inferenc
 
 ### 1. Create Conda Environment
 ```bash
-conda config --append channels conda-forge
 conda create -n vci-env python=3.9
 conda activate vci-env
 pip install -r requirements.txt
@@ -58,18 +57,26 @@ In summary, the preparation procedure includes:
 Once the environment is set up and the data are prepared, the function call to train the model is:
 
 ```bash
-./run-gene.sh &
+./run-gene.sh
 ```
 
 ```bash
-./run-celebA.sh &
+./run-celebA.sh
 ```
 
 ```bash
-./run-morphoMNIST.sh &
+./run-morphoMNIST.sh
 ```
 
 A list of flags may be found in these run files and `main.py` for experimentation with different network parameters. The run log and models are saved under `*artifact_path*/saves`, and the tensorboard log is saved under `*artifact_path*/runs`.
+
+
+### --- Morpho-MNIST Experiments ---
+To reproduce quantifiable results on interventions where ground truth counterfactuals are attainable (i.e. thickness and intensity, corresponding to Table 2, 7, 8 and Figure 3, 4, 10, 11, 12), check out [this repository](https://github.com/louieg888/variational-causal-inference-morphomnist). To generate counterfactual samples on intervening digit, run
+
+```bash
+./run-morphoMNIST-digit.sh
+```
 
 
 ## Adaptation
