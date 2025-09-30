@@ -72,7 +72,7 @@ A list of flags may be found in these run files and `main.py` for experimentatio
 
 
 ### --- Morpho-MNIST Experiments ---
-To reproduce quantifiable results on interventions where ground truth counterfactuals are attainable (i.e. thickness and intensity, corresponding to Table 2, 7, 8 and Figure 3, 4, 10, 11, 12), check out [this repository](https://github.com/louieg888/variational-causal-inference-morphomnist). To generate counterfactual samples on intervening digit, run
+To reproduce quantifiable results on interventions where ground truth counterfactuals are attainable (i.e. thickness and intensity, corresponding to Table 2, 7, 8 and Figure 3, 4, 10, 11, 12), check out [this repository](https://github.com/louieg888/variational-causal-inference-morphomnist). To generate counterfactual samples on intervening digit (corresponding to Figure 13), run
 
 ```bash
 ./run-morphoMNIST-digit.sh
